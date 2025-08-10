@@ -18,7 +18,7 @@
 #  - --log FILE and --log-level {standard,debug}
 #  - Plain, timestamped log with sensitive values scrubbed
 #
-# Version: 1.8.0
+# Version: 1.8.1
 #
 # MIT License
 # Copyright (c) 2025 CyB0rgg @ Kiroshi.Group
@@ -57,7 +57,7 @@ if missing_msgs:
         sys.exit(1)
 
 API_PREFIX = "/api/v2"
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 
 # ---------------------------
 # Logging (file + levels)
