@@ -1,45 +1,53 @@
-# fortigate-cert-swap
+# 🔒 fortigate-cert-swap
 
-Utility to upload/rotate a TLS certificate on a FortiGate and bind it to:
-- GUI (`system global admin-server-cert`)
-- SSL‑VPN (`vpn.ssl settings servercert`)
-- FTM Push (`system ftm-push server-cert`)
+A utility to **upload and rotate TLS certificates** on a FortiGate device, binding them to:
 
-It supports YAML config, dry‑run, pruning of older certs, rebind‑only mode, and file logging.
+- 🖥️ **GUI** (`system global admin-server-cert`)
+- 🔐 **SSL-VPN** (`vpn.ssl settings servercert`)
+- 📱 **FTM Push** (`system ftm-push server-cert`)
 
-> Version: **v1.8.0**
-> License: **MIT**
+Supports YAML configuration, dry-run mode, pruning older certificates, rebind-only mode, and file logging.
 
-## Features
-- **YAML config** (`-C/--config`) merged with CLI (CLI wins).
-- **Automatic name** derived from **CN + expiry date** (e.g., `fortigate.kiroshi.group-20251108`) or override with `--name`.
-- **GLOBAL vs VDOM** store selection (`--vdom` omitted ⇒ GLOBAL).
-- **Dry-run** mode to preview changes.
-- **Prune** older certs with the same base name **after successful bindings**.
-- **Rebind-only**: bind GUI/SSL‑VPN/FTM to an **existing** certificate name without upload (`--rebind`).
-- **Retries** for safe idempotency (no POST/500 retry loops).
-- **Optional logging** to file (`--log`, `--log-level {standard|debug}`).
-- **Friendly TLS hints** when verification fails (suggest `--insecure` or fixing intermediates).
+---
 
-## Requirements
+## 🚀 Features
+
+- 📄 **YAML config** (`-C/--config`) merged with CLI options (CLI takes precedence).
+- 🏷️ **Automatic naming** derived from **CN + expiry date** (e.g., `fortigate.kiroshi.group-20251108`), or override with `--name`.
+- 🌐 **GLOBAL vs VDOM** store selection (`--vdom` omitted defaults to GLOBAL).
+- 👀 **Dry-run** mode to preview changes without making them.
+- 🧹 **Prune** older certificates with the same base name **after successful bindings**.
+- 🔄 **Rebind-only** mode to bind GUI/SSL-VPN/FTM to an **existing** certificate without upload (`--rebind`).
+- 🔁 **Retries** for safe idempotency (avoids POST/500 retry loops).
+- 📜 **Optional logging** to file (`--log`, `--log-level {standard|debug}`).
+- 🛡️ **Friendly TLS hints** when verification fails (suggests `--insecure` or fixing intermediates).
+
+---
+
+## 🛠️ Requirements
+
 - Python 3.8+
 - Modules:
   - `cryptography`
   - `requests`
   - `pyyaml` (only if using `-C/--config`)
 
-Install on Debian/Ubuntu:
+### Install on Debian/Ubuntu
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y python3-cryptography python3-requests python3-yaml
 ```
 
-Or via pip:
+### Or via pip
+
 ```bash
 pip3 install cryptography requests pyyaml
 ```
 
-## Example config (fortigate.yaml)
+---
+
+## ⚙️ Example Configuration (`fortigate.yaml`)
 
 ```yaml
 # FortiGate connection & behavior
@@ -60,28 +68,41 @@ log: "~/logs/forti_cert_swap-deploy.log"
 log_level: "debug"    # standard | debug
 ```
 
-## Basic usage
-Upload & bind from an existing key/chain:
+---
+
+## 💡 Basic Usage
+
+### Upload & bind from existing key and certificate chain:
+
 ```bash
 forti_cert_swap.py -C fortigate.yaml --cert /path/fullchain.pem --key /path/privkey.pem
 ```
 
-Rebind only (no upload), using an existing cert already present on the FortiGate:
+### Rebind only (no upload), using an existing certificate name on FortiGate:
+
 ```bash
 forti_cert_swap.py -C fortigate.yaml --rebind fortigate.kiroshi.group-20251108
 ```
 
-Dry‑run:
+### Dry-run mode:
+
 ```bash
 forti_cert_swap.py -C fortigate.yaml --dry-run
 ```
 
-TLS verify issues:
-- If the FortiGate does not present full intermediates, verification can fail. Either add missing intermediates to FortiGate, or run with `--insecure` temporarily.
+### TLS verification issues:
 
-## Logging
-- Enable with `--log /path/file.log`.
-- Verbosity via `--log-level {standard|debug}` (default: `standard`).
+If the FortiGate does not present full intermediates, verification can fail. Either add missing intermediates to the FortiGate or run with `--insecure` temporarily.
 
-## License
+---
+
+## 📋 Logging
+
+- Enable logging with `--log /path/to/file.log`.
+- Set verbosity with `--log-level {standard|debug}` (default: `standard`).
+
+---
+
+## 📜 License
+
 MIT © CyB0rgg @ Kiroshi.Group, Jarvis @ Kiroshi.Group
