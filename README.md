@@ -103,6 +103,32 @@ If the FortiGate does not present full intermediates, verification can fail. Eit
 
 ---
 
+## 🧪 Testing
+
+The project includes a comprehensive test suite with 37 unit tests covering all major functionality:
+
+```bash
+# Run all tests
+python3 test_forti_cert_swap.py
+
+# Run with verbose output
+python3 test_forti_cert_swap.py -v
+
+# Run specific test class
+python3 -m unittest test_forti_cert_swap.TestCertificateProcessor -v
+```
+
+### Test Coverage
+- ✅ Configuration validation and merging
+- ✅ Certificate processing and validation
+- ✅ Enhanced logging with scrubbing
+- ✅ FortiGate API client functionality
+- ✅ Certificate operations (upload, bind, prune)
+- ✅ Error handling and edge cases
+- ✅ Integration scenarios
+
+---
+
 ## 📜 License
 
-MIT © CyB0rgg @ Kiroshi.Group, Jarvis @ Kiroshi.Group
+MIT © CyB0rgg <dev@bluco.re>
