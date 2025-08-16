@@ -1,6 +1,40 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.10.0] - 2025-08-16
+### Added
+- **SSL Inspection Certificate Mode** (`--ssl-inspection-certificate`) - Complete automated SSL inspection certificate renewal workflow with standard naming and automatic profile rebinding
+- **Certificate-Only Mode** (`--cert-only`) - Simple certificate upload without any service bindings, perfect for SSL inspection scenarios
+- **Mutually Exclusive Operation Modes** - Prevents conflicting mode usage with proper argument validation
+- **Hybrid Domain Matching** - Advanced domain matching using both text-based extraction and certificate parsing for SSL inspection profile discovery
+- **SSL Inspection Profile Rebinding** - Automatically discovers and rebinds SSL inspection profiles when certificates are renewed
+- **Multi-Profile SSL Inspection Support** - Handles multiple SSL inspection profiles using the same domain certificate
+- **SSL Inspection Certificate Pruning** - Optional deletion of old SSL inspection certificates after successful rebinding with `--prune`
+- **Enhanced Certificate Operations** - New methods for SSL inspection profile management and certificate domain extraction
+- **Dedicated Configuration Examples** - New `ssl-inspection-certificate.yaml` configuration template for SSL inspection workflows
+
+### Enhanced
+- **Certificate Naming Logic** - Fixed certificate naming to properly use certificate expiry dates instead of manual overrides
+- **Domain Extraction Logic** - Robust domain extraction from certificate names, CN, and SAN fields with wildcard handling
+- **SSL Inspection Profile Discovery** - Complete mapping of certificates to SSL inspection profiles that use them across firewall/ssl-ssh-profile configurations
+- **Configuration Validation** - Added validation for the new SSL inspection certificate modes with proper error messages
+- **Error Handling** - Improved error handling for SSL inspection operations with detailed logging and FortiGate duplicate content awareness
+
+### Fixed
+- **Certificate Naming Issue** - Resolved issue where using `--name` parameter would override automatic expiry-based naming, causing FortiGate duplicate content conflicts
+- **SSL Inspection Profile Detection** - Fixed SSL inspection profile discovery to properly handle both server-cert and ssl-server arrays in profile configurations
+- **Mode Separation** - Clarified that `--rebind` mode only affects GUI/SSL-VPN/FTM services and does NOT rebind SSL inspection profiles
+
+### Technical Improvements
+- **1491 lines of enhanced code** with comprehensive SSL inspection certificate management
+- **Advanced Certificate Analysis** - Deep inspection of FortiGate SSL inspection profile configurations with hybrid domain matching
+- **Automated Workflow Integration** - Seamless integration of certificate upload, profile rebinding, and cleanup operations
+- **Production-Ready SSL Inspection** - Battle-tested with real FortiGate SSL inspection configurations and fresh certificate renewals
+- **FortiGate Limitation Documentation** - Comprehensive documentation of FortiGate certificate duplicate content limitations and workarounds
+
+### Breaking Changes
+- **None** - All existing functionality preserved with backward compatibility
+
 ## [1.9.0] - 2025-08-14
 ### Added
 - **Comprehensive test suite** - 37 unit tests covering all major functionality with proper mocking

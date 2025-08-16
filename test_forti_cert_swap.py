@@ -138,7 +138,9 @@ class TestConfigManager(unittest.TestCase):
             timeout_read=30,
             log=None,
             log_level="standard",
-            rebind=None
+            rebind=None,
+            cert_only=False,
+            ssl_inspection_cert=False
         )
         
         config_dict = {
@@ -465,17 +467,26 @@ class TestCertificateOperations(unittest.TestCase):
         self.assertIn("cert2", certs)
     
     def test_prune_old_certificates(self):
-        """Test pruning old certificates."""
+        """Test pruning old certificates with enhanced logic."""
         self.config.prune = True
         
         # Mock certificate list
-        self.mock_api.cmdb_get.return_value = (200, {
-            "results": [
-                {"name": "example.com-20251108"},  # Current cert
-                {"name": "example.com-20251001"},  # Old cert to delete
-                {"name": "other.com-20251108"},    # Different base, skip
-            ]
-        })
+        self.mock_api.cmdb_get.side_effect = [
+            # First call: list_local_certs
+            (200, {
+                "results": [
+                    {"name": "example.com-20251108"},  # Current cert
+                    {"name": "example.com-20251001"},  # Old cert to delete
+                    {"name": "other.com-20251108"},    # Different base, skip
+                ]
+            }),
+            # Subsequent calls: check_certificate_bindings for example.com-20251001
+            (200, {"results": [{"admin-server-cert": "different-cert"}]}),  # GUI check
+            (200, {"results": [{"servercert": "different-cert"}]}),         # SSL-VPN check
+            (200, {"results": [{"server-cert": "different-cert"}]}),        # FTM check
+            # SSL inspection profiles check (empty)
+            (200, {"results": []})
+        ]
         
         # Mock successful deletion
         self.mock_api.cmdb_delete.return_value = (200, {"status": "deleted"})
@@ -486,6 +497,38 @@ class TestCertificateOperations(unittest.TestCase):
         self.assertIn("example.com-20251001", result["deleted"])
         self.assertEqual(len(result["skipped"]), 1)
         self.assertEqual(result["skipped"][0]["name"], "other.com-20251108")
+    
+    def test_cert_only_upload(self):
+        """Test certificate-only upload method."""
+        self.mock_api.cmdb_post.return_value = (200, {"status": "success"})
+        
+        state, detail = self.cert_ops.cert_only_upload(
+            "test-cert", "cert-pem", "key-pem"
+        )
+        
+        self.assertEqual(state, "created")
+        self.assertEqual(detail["status"], "success")
+    
+    def test_check_certificate_bindings(self):
+        """Test certificate service binding checks."""
+        # Mock API responses for service binding checks
+        self.mock_api.cmdb_get.side_effect = [
+            # GUI binding check
+            (200, {"results": [{"admin-server-cert": "test-cert"}]}),
+            # SSL-VPN binding check
+            (200, {"results": [{"servercert": "different-cert"}]}),
+            # FTM binding check
+            (200, {"results": [{"server-cert": "different-cert"}]}),
+            # SSL inspection profiles check
+            (200, {"results": []})
+        ]
+        
+        bindings = self.cert_ops.check_certificate_bindings("test-cert")
+        
+        self.assertTrue(bindings["gui"])
+        self.assertFalse(bindings["ssl_vpn"])
+        self.assertFalse(bindings["ftm"])
+        self.assertFalse(bindings["ssl_inspection"])
 
 
 class TestFortiCertSwapIntegration(unittest.TestCase):

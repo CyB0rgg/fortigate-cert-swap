@@ -8,8 +8,10 @@
 #  - Automatic cert naming from CN + expiry date, or override with --name
 #  - GLOBAL vs VDOM certificate store selection
 #  - Dry-run mode for testing without changes
-#  - Prune older certificates with same base name after successful bindings
+#  - Prune older certificates with same base name after successful bindings (only unbound certificates)
 #  - Rebind-only mode: --rebind <existing-cert-name>
+#  - Certificate-only mode: --cert-only (upload certificate without service bindings)
+#  - SSL inspection certificate mode: --ssl-inspection-certificate (automated SSL inspection profile rebinding)
 #  - Robust retry policy with intelligent error handling
 #  - TLS verification with --insecure option for self-signed certificates
 #  - Enhanced logging with --log FILE and --log-level {standard,debug}
@@ -17,7 +19,7 @@
 #  - Operation correlation IDs for debugging
 #  - Sensitive data scrubbing in logs for security
 #
-# Version: 1.9.0
+# Version: 1.10.0
 #
 # MIT License
 # Copyright (c) 2025 CyB0rgg <dev@bluco.re>
@@ -66,7 +68,7 @@ if missing_msgs:
         sys.exit(1)
 
 API_PREFIX = "/api/v2"
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 
 # ---------------------------
 # Configuration & Validation
@@ -95,6 +97,8 @@ class Config:
     log: Optional[str] = None
     log_level: str = "standard"
     rebind: Optional[str] = None
+    cert_only: bool = False
+    ssl_inspection_cert: bool = False
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -690,6 +694,11 @@ class CertificateOperations:
         
         return "error", {"http_status": code, "detail": data}
 
+    def cert_only_upload(self, name: str, cert_pem: str, key_pem: str) -> Tuple[str, Any]:
+        """Upload or update certificate only, without any service bindings."""
+        # Use the same logic as the main script: try POST first, then PUT
+        return self.upload_or_update_cert(name, cert_pem, key_pem)
+
     def bind_gui(self, name: str) -> Tuple[bool, Dict[str, Any]]:
         """Bind certificate to GUI."""
         payload = {"admin-server-cert": name}
@@ -726,6 +735,259 @@ class CertificateOperations:
         
         return names
 
+    def get_ssl_inspection_certificates(self) -> List[str]:
+        """Get certificates currently used in SSL inspection profiles."""
+        mappings = self.get_ssl_inspection_profile_mappings()
+        return list(mappings.keys())
+
+    def get_ssl_inspection_profile_mappings(self) -> Dict[str, List[str]]:
+        """Get complete mapping of certificates to SSL inspection profiles that use them."""
+        params = _scope_params("global" if self.config.store == "GLOBAL" else "vdom", self.config.vdom)
+        
+        # Get SSL inspection profiles
+        code, data = self.api.cmdb_get("firewall/ssl-ssh-profile", params=params)
+        
+        cert_to_profiles = {}  # cert_name -> [profile_names]
+        if code == 200 and isinstance(data, dict):
+            results = data.get("results") or data.get("data") or []
+            for profile in results:
+                profile_name = profile.get("name", "unknown")
+                
+                # Check server-cert array (for replace mode)
+                server_certs = profile.get("server-cert", [])
+                if isinstance(server_certs, list):
+                    for cert_obj in server_certs:
+                        if isinstance(cert_obj, dict):
+                            cert_name = cert_obj.get("name")
+                            if cert_name:
+                                if cert_name not in cert_to_profiles:
+                                    cert_to_profiles[cert_name] = []
+                                if profile_name not in cert_to_profiles[cert_name]:
+                                    cert_to_profiles[cert_name].append(profile_name)
+                                self.logger.debug(f"Found SSL inspection cert: {cert_name} in profile: {profile_name}")
+                
+                # Check ssl-server array (alternative location)
+                ssl_servers = profile.get("ssl-server", [])
+                if isinstance(ssl_servers, list):
+                    for server_obj in ssl_servers:
+                        if isinstance(server_obj, dict):
+                            cert_name = server_obj.get("name")
+                            if cert_name:
+                                if cert_name not in cert_to_profiles:
+                                    cert_to_profiles[cert_name] = []
+                                if profile_name not in cert_to_profiles[cert_name]:
+                                    cert_to_profiles[cert_name].append(profile_name)
+                                self.logger.debug(f"Found SSL server cert: {cert_name} in profile: {profile_name}")
+        
+        return cert_to_profiles
+
+    def suggest_ssl_inspection_cert_name(self, planned_name: str, cert_pem: str) -> Optional[str]:
+        """Suggest existing SSL inspection certificate name based on domain matching."""
+        try:
+            # Extract domain from the certificate we're trying to upload
+            upload_domain = self._extract_domain_from_cert(cert_pem)
+            if not upload_domain:
+                self.logger.debug("Could not extract domain from certificate")
+                return None
+            
+            # Get all SSL inspection profile mappings
+            profile_mappings = self.get_ssl_inspection_profile_mappings()
+            if not profile_mappings:
+                self.logger.debug("No SSL inspection certificates found")
+                return None
+            
+            # Try to match by domain using hybrid approach
+            domain_matches = []
+            for cert_name, profiles in profile_mappings.items():
+                # First try: Fast text-based matching from certificate name
+                cert_domain = self._extract_domain_from_cert_name(cert_name)
+                if cert_domain and self._domains_match(upload_domain, cert_domain):
+                    domain_matches.append((cert_name, profiles))
+                    self.logger.debug(f"Domain match found (text-based): {cert_name} (domain: {cert_domain}) used in profiles: {', '.join(profiles)}")
+                    continue
+                
+                # Second try: Fetch and parse actual certificate from FortiGate
+                cert_domain = self._extract_domain_from_fortigate_cert(cert_name)
+                if cert_domain and self._domains_match(upload_domain, cert_domain):
+                    domain_matches.append((cert_name, profiles))
+                    self.logger.debug(f"Domain match found (certificate-based): {cert_name} (domain: {cert_domain}) used in profiles: {', '.join(profiles)}")
+            
+            if len(domain_matches) == 1:
+                cert_name, profiles = domain_matches[0]
+                self.logger.info(f"SSL inspection certificate match: {cert_name} used in {len(profiles)} profile(s): {', '.join(profiles)}")
+                return cert_name
+            elif len(domain_matches) > 1:
+                cert_names = [match[0] for match in domain_matches]
+                total_profiles = sum(len(match[1]) for match in domain_matches)
+                self.logger.warn(f"Multiple SSL inspection certificates found for domain {upload_domain}: {', '.join(cert_names)} (total {total_profiles} profiles)")
+                # Return the first match for now
+                cert_name, profiles = domain_matches[0]
+                self.logger.info(f"Using first match: {cert_name} used in {len(profiles)} profile(s): {', '.join(profiles)}")
+                return cert_name
+            
+            self.logger.debug(f"No SSL inspection certificates found matching domain: {upload_domain}")
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"Could not suggest SSL inspection certificate name: {e}")
+            return None
+
+    def _extract_domain_from_cert(self, cert_pem: str) -> Optional[str]:
+        """Extract domain from certificate PEM."""
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.backends import default_backend
+            from cryptography.x509.oid import NameOID
+            
+            # Get the first certificate from the chain
+            chunks = CertificateProcessor._split_pem_chain(cert_pem)
+            if not chunks:
+                return None
+            
+            cert = x509.load_pem_x509_certificate(chunks[0].encode("utf-8"), default_backend())
+            
+            # Try CN first
+            for attr in cert.subject:
+                if attr.oid == NameOID.COMMON_NAME:
+                    domain = attr.value.strip()
+                    # Remove wildcard prefix if present
+                    if domain.startswith("*."):
+                        domain = domain[2:]
+                    return domain.lower()
+            
+            # Fall back to SAN
+            try:
+                san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+                dns_names = san.get_values_for_type(x509.DNSName)
+                if dns_names:
+                    domain = dns_names[0].strip()
+                    # Remove wildcard prefix if present
+                    if domain.startswith("*."):
+                        domain = domain[2:]
+                    return domain.lower()
+            except Exception:
+                pass
+            
+            return None
+        except Exception as e:
+            self.logger.debug(f"Failed to extract domain from certificate: {e}")
+            return None
+
+    def _extract_domain_from_cert_name(self, cert_name: str) -> Optional[str]:
+        """Extract domain from certificate name (e.g., 'BluCore.io' -> 'blucore.io')."""
+        try:
+            # Handle standard naming scheme (domain-YYYYMMDD)
+            if re.match(r"^.+-\d{8}$", cert_name):
+                domain = cert_name.rsplit("-", 1)[0]
+                return domain.lower()
+            
+            # Handle direct domain names (like 'BluCore.io')
+            # Remove common certificate name patterns
+            domain = cert_name.lower()
+            
+            # Check if it looks like a domain
+            if "." in domain and not domain.startswith("fortinet"):
+                return domain
+            
+            return None
+        except Exception:
+            return None
+
+    def _extract_domain_from_fortigate_cert(self, cert_name: str) -> Optional[str]:
+        """Extract domain from FortiGate certificate by fetching and parsing it."""
+        try:
+            # Fetch certificate from FortiGate
+            params = _scope_params("global" if self.config.store == "GLOBAL" else "vdom", self.config.vdom)
+            code, data = self.api.cmdb_get(f"vpn.certificate/local/{cert_name}", params=params)
+            
+            if code != 200 or not isinstance(data, dict):
+                self.logger.debug(f"Failed to fetch certificate {cert_name}: HTTP {code}")
+                return None
+            
+            # Extract certificate content
+            results = data.get("results")
+            if not results:
+                self.logger.debug(f"No results for certificate {cert_name}")
+                return None
+            
+            # Handle both single result and array of results
+            cert_data = results[0] if isinstance(results, list) else results
+            cert_pem = cert_data.get("certificate")
+            
+            if not cert_pem:
+                self.logger.debug(f"No certificate content found for {cert_name}")
+                return None
+            
+            # Parse certificate and extract domain
+            return self._extract_domain_from_cert(cert_pem)
+            
+        except Exception as e:
+            self.logger.debug(f"Failed to extract domain from FortiGate certificate {cert_name}: {e}")
+            return None
+
+    def _domains_match(self, domain1: str, domain2: str) -> bool:
+        """Check if two domains match (case-insensitive)."""
+        if not domain1 or not domain2:
+            return False
+        return domain1.lower() == domain2.lower()
+
+    def check_certificate_bindings(self, cert_name: str) -> Dict[str, bool]:
+        """Check if certificate is bound to any services."""
+        bindings = {
+            "gui": False,
+            "ssl_vpn": False,
+            "ftm": False,
+            "ssl_inspection": False
+        }
+        
+        params = _scope_params("global" if self.config.store == "GLOBAL" else "vdom", self.config.vdom)
+        
+        try:
+            # Check GUI binding
+            code, data = self.api.cmdb_get("system/global", params=params)
+            if code == 200 and isinstance(data, dict):
+                results = data.get("results")
+                if results:
+                    result_data = results[0] if isinstance(results, list) else results
+                    admin_cert = result_data.get("admin-server-cert")
+                    if admin_cert == cert_name:
+                        bindings["gui"] = True
+                        self.logger.debug(f"Certificate {cert_name} is bound to GUI")
+            
+            # Check SSL-VPN binding
+            code, data = self.api.cmdb_get("vpn.ssl/settings", params=params)
+            if code == 200 and isinstance(data, dict):
+                results = data.get("results")
+                if results:
+                    result_data = results[0] if isinstance(results, list) else results
+                    ssl_cert = result_data.get("servercert")
+                    if ssl_cert == cert_name:
+                        bindings["ssl_vpn"] = True
+                        self.logger.debug(f"Certificate {cert_name} is bound to SSL-VPN")
+            
+            # Check FTM binding
+            code, data = self.api.cmdb_get("system/ftm-push", params=params)
+            if code == 200 and isinstance(data, dict):
+                results = data.get("results")
+                if results:
+                    result_data = results[0] if isinstance(results, list) else results
+                    ftm_cert = result_data.get("server-cert")
+                    if ftm_cert == cert_name:
+                        bindings["ftm"] = True
+                        self.logger.debug(f"Certificate {cert_name} is bound to FTM")
+            
+            # Check SSL inspection bindings
+            ssl_inspection_mappings = self.get_ssl_inspection_profile_mappings()
+            if cert_name in ssl_inspection_mappings:
+                bindings["ssl_inspection"] = True
+                profiles = ssl_inspection_mappings[cert_name]
+                self.logger.debug(f"Certificate {cert_name} is bound to SSL inspection profiles: {', '.join(profiles)}")
+                
+        except Exception as e:
+            self.logger.warn(f"Error checking certificate bindings for {cert_name}: {e}")
+        
+        return bindings
+
     def delete_cert(self, name: str) -> Tuple[bool, Dict[str, Any]]:
         """Delete certificate."""
         params = _scope_params("global" if self.config.store == "GLOBAL" else "vdom", self.config.vdom)
@@ -733,33 +995,181 @@ class CertificateOperations:
         return (code == 200), {"http_status": code, "detail": data}
 
     def prune_old_certificates(self, current_name: str) -> Dict[str, Any]:
-        """Prune old certificates with same base name."""
+        """Enhanced pruning: delete certificates with same base domain, older expiry, and no service bindings."""
         result = {"deleted": [], "skipped": []}
         
         if not self.config.prune:
             return result
         
-        base = CertificateProcessor.base_from_name(current_name)
-        names = self.list_local_certs()
+        # Extract base domain and expiry from current certificate
+        current_base = CertificateProcessor.base_from_name(current_name)
+        current_expiry = self._extract_expiry_from_name(current_name)
         
-        for name in names:
-            if name == current_name:
+        if not current_expiry:
+            self.logger.warn(f"Could not extract expiry date from current certificate name: {current_name}")
+            return result
+        
+        # Get all local certificates
+        all_certs = self.list_local_certs()
+        
+        for cert_name in all_certs:
+            if cert_name == current_name:
+                continue  # Skip current certificate
+            
+            # Check if certificate has same base domain
+            cert_base = CertificateProcessor.base_from_name(cert_name)
+            if cert_base != current_base:
+                result["skipped"].append({"name": cert_name, "reason": "different base domain"})
                 continue
             
-            if CertificateProcessor.base_from_name(name) != base:
-                result["skipped"].append({"name": name, "reason": "different base"})
+            # Extract expiry date from certificate name
+            cert_expiry = self._extract_expiry_from_name(cert_name)
+            if not cert_expiry:
+                result["skipped"].append({"name": cert_name, "reason": "could not extract expiry date"})
                 continue
             
-            success, detail = self.delete_cert(name)
+            # Only consider certificates with older expiry dates
+            if cert_expiry >= current_expiry:
+                result["skipped"].append({"name": cert_name, "reason": f"not older (expires {cert_expiry}, current expires {current_expiry})"})
+                continue
+            
+            # Check if certificate is bound to any services
+            bindings = self.check_certificate_bindings(cert_name)
+            bound_services = [service for service, is_bound in bindings.items() if is_bound]
+            
+            if bound_services:
+                result["skipped"].append({"name": cert_name, "reason": f"bound to services: {', '.join(bound_services)}"})
+                self.logger.info(f"Skipping certificate {cert_name} - bound to services: {', '.join(bound_services)}")
+                continue
+            
+            # Safe to delete: same base domain, older expiry, no service bindings
+            self.logger.info(f"Pruning old certificate: {cert_name} (expires {cert_expiry}, current expires {current_expiry}, no service bindings)")
+            
+            if self.config.dry_run:
+                self.logger.info(f"DRYRUN: would delete old certificate: {cert_name}")
+                result["deleted"].append(cert_name)
+                continue
+            
+            success, detail = self.delete_cert(cert_name)
             if success:
-                result["deleted"].append(name)
-                self.logger.info(f"Pruned old certificate: {name}")
+                result["deleted"].append(cert_name)
+                self.logger.info(f"Pruned old certificate: {cert_name}")
             else:
-                reason = f"delete failed ({detail.get('http_status')})"
-                result["skipped"].append({"name": name, "reason": reason})
-                self.logger.warn(f"Failed to prune certificate {name}: {reason}")
+                reason = f"delete failed (HTTP {detail.get('http_status')})"
+                result["skipped"].append({"name": cert_name, "reason": reason})
+                self.logger.warn(f"Failed to prune certificate {cert_name}: {reason}")
         
         return result
+
+    def rebind_ssl_inspection_profiles(self, old_cert_name: str, new_cert_name: str, profiles: List[str]) -> Dict[str, Any]:
+        """Rebind SSL inspection profiles from old certificate to new certificate."""
+        result = {"rebound": [], "failed": []}
+        
+        if not profiles:
+            self.logger.debug("No SSL inspection profiles to rebind")
+            return result
+        
+        params = _scope_params("global" if self.config.store == "GLOBAL" else "vdom", self.config.vdom)
+        
+        for profile_name in profiles:
+            try:
+                # Update the profile to use the new certificate
+                payload = {"server-cert": [{"name": new_cert_name}]}
+                
+                if self.config.dry_run:
+                    self.logger.info(f"DRYRUN: would rebind SSL inspection profile '{profile_name}' from '{old_cert_name}' to '{new_cert_name}'")
+                    result["rebound"].append({"profile": profile_name, "old_cert": old_cert_name, "new_cert": new_cert_name, "dry_run": True})
+                    continue
+                
+                # URL encode the profile name for API call
+                import urllib.parse
+                encoded_profile = urllib.parse.quote(profile_name, safe='')
+                
+                code, data = self.api.cmdb_put(f"firewall/ssl-ssh-profile/{encoded_profile}", payload, params=params)
+                
+                if code == 200:
+                    result["rebound"].append({"profile": profile_name, "old_cert": old_cert_name, "new_cert": new_cert_name})
+                    self.logger.info(f"Rebound SSL inspection profile '{profile_name}' from '{old_cert_name}' to '{new_cert_name}'")
+                else:
+                    error_detail = {"profile": profile_name, "http_status": code, "detail": data}
+                    result["failed"].append(error_detail)
+                    self.logger.error(f"Failed to rebind SSL inspection profile '{profile_name}': HTTP {code}")
+                    
+            except Exception as e:
+                error_detail = {"profile": profile_name, "error": str(e)}
+                result["failed"].append(error_detail)
+                self.logger.error(f"Exception rebinding SSL inspection profile '{profile_name}': {e}")
+        
+        return result
+
+    def prune_ssl_inspection_certificates(self, current_name: str, domain: str) -> Dict[str, Any]:
+        """Prune old SSL inspection certificates with same domain and older expiry dates."""
+        result = {"deleted": [], "skipped": []}
+        
+        if not self.config.prune:
+            return result
+        
+        # Extract expiry date from current certificate name
+        current_expiry = self._extract_expiry_from_name(current_name)
+        if not current_expiry:
+            self.logger.warn(f"Could not extract expiry date from current certificate name: {current_name}")
+            return result
+        
+        # Get all local certificates
+        all_certs = self.list_local_certs()
+        
+        # Find certificates with same domain but older expiry dates
+        for cert_name in all_certs:
+            if cert_name == current_name:
+                continue  # Skip current certificate
+            
+            # Check if certificate matches the domain
+            cert_domain = self._extract_domain_from_cert_name(cert_name)
+            if not cert_domain:
+                # Try fetching and parsing the actual certificate
+                cert_domain = self._extract_domain_from_fortigate_cert(cert_name)
+            
+            if not cert_domain or not self._domains_match(domain, cert_domain):
+                continue  # Skip certificates for different domains
+            
+            # Extract expiry date from certificate name
+            cert_expiry = self._extract_expiry_from_name(cert_name)
+            if not cert_expiry:
+                self.logger.debug(f"Could not extract expiry date from certificate name: {cert_name}")
+                continue
+            
+            # Only delete certificates with older expiry dates
+            if cert_expiry < current_expiry:
+                self.logger.info(f"Pruning old SSL inspection certificate: {cert_name} (expires {cert_expiry}, current expires {current_expiry})")
+                
+                if self.config.dry_run:
+                    self.logger.info(f"DRYRUN: would delete old SSL inspection certificate: {cert_name}")
+                    result["deleted"].append(cert_name)
+                    continue
+                
+                success, detail = self.delete_cert(cert_name)
+                if success:
+                    result["deleted"].append(cert_name)
+                    self.logger.info(f"Pruned old SSL inspection certificate: {cert_name}")
+                else:
+                    reason = f"delete failed (HTTP {detail.get('http_status')})"
+                    result["skipped"].append({"name": cert_name, "reason": reason})
+                    self.logger.warn(f"Failed to prune SSL inspection certificate {cert_name}: {reason}")
+            else:
+                self.logger.debug(f"Skipping certificate {cert_name} (expires {cert_expiry}, not older than current {current_expiry})")
+        
+        return result
+
+    def _extract_expiry_from_name(self, cert_name: str) -> Optional[str]:
+        """Extract expiry date from certificate name (e.g., 'blucore.io-20251114' -> '20251114')."""
+        try:
+            # Handle standard naming scheme (domain-YYYYMMDD)
+            match = re.match(r"^.+-(\d{8})$", cert_name)
+            if match:
+                return match.group(1)
+            return None
+        except Exception:
+            return None
 
 # ---------------------------
 # Main Application
@@ -775,7 +1185,7 @@ class FortiCertSwap:
     def parse_arguments(self) -> argparse.Namespace:
         """Parse command line arguments."""
         parser = argparse.ArgumentParser(
-            description="Upload/rotate FortiGate certificate and bind to GUI/SSL-VPN/FTM.",
+            description="Upload/rotate FortiGate certificate and bind to GUI/SSL-VPN/FTM, or upload certificate only.",
             formatter_class=argparse.RawDescriptionHelpFormatter
         )
         
@@ -804,10 +1214,14 @@ class FortiCertSwap:
         # Configuration
         parser.add_argument("-C", "--config", help="YAML config file")
         
-        # Rebind mode
-        rebind_group = parser.add_mutually_exclusive_group()
-        rebind_group.add_argument("--rebind", metavar="CERTNAME", 
-                                help="Bind GUI/SSL-VPN/FTM to existing certificate name on FortiGate")
+        # Operation modes
+        mode_group = parser.add_mutually_exclusive_group()
+        mode_group.add_argument("--rebind", metavar="CERTNAME",
+                               help="Bind GUI/SSL-VPN/FTM to existing certificate name on FortiGate")
+        mode_group.add_argument("--cert-only", dest="cert_only", action="store_true",
+                               help="Upload/update certificate only without binding to any services")
+        mode_group.add_argument("--ssl-inspection-certificate", dest="ssl_inspection_cert", action="store_true",
+                               help="Upload certificate with standard naming and rebind SSL inspection profiles")
         
         # Logging
         parser.add_argument("--log", help="Write a plain log to this file")
@@ -864,6 +1278,199 @@ class FortiCertSwap:
         self.logger.info(f"rebind_only name={planned_name}")
         
         return self._execute_certificate_operations(config, planned_name, None, None)
+
+    def run_cert_only_mode(self, config: Config) -> Dict[str, Any]:
+        """Run in certificate-only mode (no service bindings)."""
+        # Load and validate certificate files
+        cert_pem = CertificateProcessor.load_file(config.cert)
+        key_pem = CertificateProcessor.load_file(config.key)
+        
+        # Validate formats
+        CertificateProcessor.validate_certificate_format(cert_pem)
+        CertificateProcessor.validate_private_key_format(key_pem)
+        
+        # Display certificate summary
+        print(CertificateProcessor.summarize_chain(cert_pem))
+        
+        # Generate certificate name (user-specified or auto-generated)
+        planned_name = CertificateProcessor.planned_cert_name(cert_pem, config.name)
+        print(f"[*] Certificate name: {planned_name}")
+        print(f"[*] Certificate-only mode: {planned_name}")
+        print(f"[*] Target store: {config.store}")
+        
+        # Initialize API client
+        api = FortiAPI(config, self.logger)
+        cert_ops = CertificateOperations(api, config, self.logger)
+        
+        result = {
+            "status": "ok",
+            "certificate": None,
+            "mode": "cert_only",
+            "version": VERSION
+        }
+        
+        # Upload certificate only (no bindings)
+        try:
+            state, detail = cert_ops.cert_only_upload(planned_name, cert_pem, key_pem)
+        except APIError as e:
+            self.logger.error(f"Certificate upload failed: {e}")
+            raise
+        
+        if state == "dry_run":
+            return {"status": "dry_run", "detail": detail, "mode": "cert_only", "version": VERSION}
+        
+        msg = {
+            "created": "created new",
+            "updated": "updated existing",
+            "error": "failed to upload"
+        }.get(state, "unknown state")
+        
+        http_code = detail.get('http_status', 'n/a') if isinstance(detail, dict) else 'n/a'
+        method = 'cmdb_post' if state == 'created' else 'cmdb_put'
+        
+        print(f"[*] Result: {msg} certificate \"{planned_name}\" in {config.store} store (via {method}, HTTP {http_code})")
+        print(f"[*] Certificate uploaded without service bindings")
+        
+        self.logger.info(f"Certificate-only upload completed: {msg} (HTTP {http_code})")
+        
+        if state == "error":
+            raise APIError(f"Certificate upload failed: HTTP {http_code}")
+        
+        result["certificate"] = {"name": planned_name, "store": config.store, "state": state}
+        
+        # Enhanced pruning for cert-only mode if requested
+        if config.prune:
+            prune_result = cert_ops.prune_old_certificates(planned_name)
+            result["pruned"] = {"deleted": prune_result["deleted"], "skipped": prune_result["skipped"]}
+            
+            deleted_count = len(prune_result["deleted"])
+            skipped_count = len(prune_result["skipped"])
+            
+            if deleted_count > 0:
+                print(f"[*] Pruned {deleted_count} old certificate(s): {', '.join(prune_result['deleted'])}")
+            if skipped_count > 0:
+                print(f"[!] Skipped {skipped_count} certificate(s) during pruning")
+        
+        return result
+
+    def run_ssl_inspection_cert_mode(self, config: Config) -> Dict[str, Any]:
+        """Run in SSL inspection certificate mode with standard naming and rebinding."""
+        # Load and validate certificate files
+        cert_pem = CertificateProcessor.load_file(config.cert)
+        key_pem = CertificateProcessor.load_file(config.key)
+        
+        # Validate formats
+        CertificateProcessor.validate_certificate_format(cert_pem)
+        CertificateProcessor.validate_private_key_format(key_pem)
+        
+        # Display certificate summary
+        print(CertificateProcessor.summarize_chain(cert_pem))
+        
+        # Generate standard certificate name (like main script)
+        planned_name = CertificateProcessor.planned_cert_name(cert_pem, config.name)
+        print(f"[*] SSL inspection certificate mode: {planned_name}")
+        print(f"[*] Target store: {config.store}")
+        
+        # Initialize API client
+        api = FortiAPI(config, self.logger)
+        cert_ops = CertificateOperations(api, config, self.logger)
+        
+        result = {
+            "status": "ok",
+            "certificate": None,
+            "ssl_inspection": {"profiles_rebound": [], "profiles_failed": []},
+            "pruned": {"deleted": [], "skipped": []},
+            "mode": "ssl_inspection_cert",
+            "version": VERSION
+        }
+        
+        # Get SSL inspection profile mappings for the domain
+        upload_domain = cert_ops._extract_domain_from_cert(cert_pem)
+        if not upload_domain:
+            raise CertificateError("Could not extract domain from certificate for SSL inspection matching")
+        
+        profile_mappings = cert_ops.get_ssl_inspection_profile_mappings()
+        
+        # Find SSL inspection certificates for this domain
+        old_ssl_certs = []
+        profiles_to_rebind = []
+        
+        for cert_name, profiles in profile_mappings.items():
+            cert_domain = cert_ops._extract_domain_from_cert_name(cert_name)
+            if not cert_domain:
+                cert_domain = cert_ops._extract_domain_from_fortigate_cert(cert_name)
+            
+            if cert_domain and cert_ops._domains_match(upload_domain, cert_domain):
+                old_ssl_certs.append(cert_name)
+                profiles_to_rebind.extend(profiles)
+                self.logger.info(f"Found SSL inspection certificate: {cert_name} used in {len(profiles)} profile(s): {', '.join(profiles)}")
+        
+        if not profiles_to_rebind:
+            self.logger.warn(f"No SSL inspection profiles found for domain {upload_domain}")
+        else:
+            print(f"[*] Found {len(profiles_to_rebind)} SSL inspection profile(s) to rebind: {', '.join(profiles_to_rebind)}")
+        
+        # Upload new certificate
+        try:
+            state, detail = cert_ops.upload_or_update_cert(planned_name, cert_pem, key_pem)
+        except APIError as e:
+            self.logger.error(f"Certificate upload failed: {e}")
+            raise
+        
+        if state == "dry_run":
+            return {"status": "dry_run", "detail": detail, "ssl_inspection": result["ssl_inspection"], "mode": "ssl_inspection_cert", "version": VERSION}
+        
+        msg = {
+            "created": "created new",
+            "updated": "updated existing",
+            "error": "failed to upload"
+        }.get(state, "unknown state")
+        
+        http_code = detail.get('http_status', 'n/a') if isinstance(detail, dict) else 'n/a'
+        method = 'cmdb_post' if state == 'created' else 'cmdb_put'
+        
+        print(f"[*] Result: {msg} certificate \"{planned_name}\" in {config.store} store (via {method}, HTTP {http_code})")
+        self.logger.info(f"Certificate upload completed: {msg} (HTTP {http_code})")
+        
+        if state == "error":
+            raise APIError(f"Certificate upload failed: HTTP {http_code}")
+        
+        result["certificate"] = {"name": planned_name, "store": config.store, "state": state}
+        
+        # Rebind SSL inspection profiles
+        if profiles_to_rebind:
+            print(f"[*] Rebinding {len(profiles_to_rebind)} SSL inspection profile(s)...")
+            
+            for old_cert in old_ssl_certs:
+                profiles_for_cert = [p for p in profiles_to_rebind if p in profile_mappings.get(old_cert, [])]
+                if profiles_for_cert:
+                    rebind_result = cert_ops.rebind_ssl_inspection_profiles(old_cert, planned_name, profiles_for_cert)
+                    result["ssl_inspection"]["profiles_rebound"].extend(rebind_result["rebound"])
+                    result["ssl_inspection"]["profiles_failed"].extend(rebind_result["failed"])
+            
+            rebound_count = len(result["ssl_inspection"]["profiles_rebound"])
+            failed_count = len(result["ssl_inspection"]["profiles_failed"])
+            
+            if rebound_count > 0:
+                print(f"[*] Successfully rebound {rebound_count} SSL inspection profile(s)")
+            if failed_count > 0:
+                print(f"[!] Failed to rebind {failed_count} SSL inspection profile(s)")
+        
+        # Prune old certificates if requested (enhanced logic with service binding checks)
+        if config.prune:
+            prune_result = cert_ops.prune_old_certificates(planned_name)
+            result["pruned"]["deleted"].extend(prune_result["deleted"])
+            result["pruned"]["skipped"].extend(prune_result["skipped"])
+            
+            deleted_count = len(prune_result["deleted"])
+            skipped_count = len(prune_result["skipped"])
+            
+            if deleted_count > 0:
+                print(f"[*] Pruned {deleted_count} old certificate(s): {', '.join(prune_result['deleted'])}")
+            if skipped_count > 0:
+                print(f"[!] Skipped {skipped_count} certificate(s) during pruning")
+        
+        return result
 
     def _execute_certificate_operations(self, config: Config, cert_name: str,
                                       cert_pem: Optional[str], key_pem: Optional[str]) -> Dict[str, Any]:
@@ -990,8 +1597,14 @@ class FortiCertSwap:
             self.setup_logging(self.config)
             
             # Validate required parameters
-            if not self.config.rebind and (not self.config.cert or not self.config.key):
+            if not self.config.rebind and not self.config.cert_only and not self.config.ssl_inspection_cert and (not self.config.cert or not self.config.key):
                 raise ConfigurationError("cert and key are required unless --rebind CERTNAME is used.")
+            
+            if self.config.cert_only and (not self.config.cert or not self.config.key):
+                raise ConfigurationError("cert and key are required for --cert-only mode.")
+            
+            if self.config.ssl_inspection_cert and (not self.config.cert or not self.config.key):
+                raise ConfigurationError("cert and key are required for --ssl-inspection-certificate mode.")
             
             # Print effective configuration
             self.print_effective_config(self.config, used_config=bool(args.config))
@@ -999,6 +1612,10 @@ class FortiCertSwap:
             # Run appropriate mode
             if self.config.rebind:
                 result = self.run_rebind_mode(self.config)
+            elif self.config.cert_only:
+                result = self.run_cert_only_mode(self.config)
+            elif self.config.ssl_inspection_cert:
+                result = self.run_ssl_inspection_cert_mode(self.config)
             else:
                 result = self.run_upload_mode(self.config)
             

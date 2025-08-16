@@ -19,14 +19,68 @@ pip3 install cryptography requests pyyaml
 
 ### 3. **Basic Usage**
 ```bash
-# With config file
+# Standard mode - GUI/SSL-VPN/FTM binding
 python3 forti_cert_swap.py -C fortigate.yaml --cert /path/to/cert.pem --key /path/to/key.pem
 
-# With environment variables
-export FORTI_CERT_HOST=fortigate.example.com
-export FORTI_CERT_PORT=8443
-export FORTI_CERT_TOKEN=your-api-token
-python3 forti_cert_swap.py --cert /path/to/cert.pem --key /path/to/key.pem
+# Certificate-only mode - SSL inspection
+python3 forti_cert_swap.py --cert-only --cert /path/to/cert.pem --key /path/to/key.pem -C fortigate.yaml
+
+# SSL inspection certificate mode - automated rebinding
+python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem --key /path/to/key.pem -C ssl-inspection-certificate.yaml
+
+# Rebind GUI/SSL-VPN/FTM services only
+python3 forti_cert_swap.py --rebind existing-cert-name -C fortigate.yaml
+```
+
+## 🔒 SSL Inspection Certificate Management
+
+### Certificate-Only Mode (`--cert-only`)
+Perfect for SSL inspection scenarios where you need to upload certificates without affecting service bindings:
+
+```bash
+# Simple certificate upload for SSL inspection
+python3 forti_cert_swap.py --cert-only --cert /path/to/cert.pem --key /path/to/key.pem -C fortigate.yaml
+```
+
+**Use Cases**:
+- SSL inspection certificate updates
+- Certificate content refresh without service disruption
+- Manual certificate management workflows
+
+### SSL Inspection Certificate Mode (`--ssl-inspection-certificate`)
+Complete automated SSL inspection certificate renewal workflow:
+
+```bash
+# Automated SSL inspection certificate renewal
+python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem --key /path/to/key.pem --host fortigate.kiroshi.group --port 8443 --token TOKEN --insecure
+
+# With pruning of old certificates
+python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem --key /path/to/key.pem --prune -C ssl-inspection-certificate.yaml
+```
+
+**Features**:
+- **Domain-based discovery**: Finds SSL inspection profiles by certificate domain
+- **Automatic rebinding**: Transfers profiles from old to new certificates
+- **Multi-profile support**: Handles multiple profiles using the same certificate
+- **Standard naming**: Uses domain-expiry format (e.g., `kiroshi.group-20251114`)
+- **Optional pruning**: Deletes old certificates after successful rebinding
+
+### ⚠️ FortiGate Certificate Duplicate Content Limitation
+
+**Important**: FortiGate prevents uploading certificates with identical content but different names.
+
+**Workarounds**:
+- **For `--ssl-inspection-certificate`**: Always use fresh certificate content (renewed certificates)
+- **For `--cert-only`**: Do NOT use `--name` parameter - let system auto-generate names
+- **For testing**: Ensure certificate content is actually different
+
+**Example**:
+```bash
+# INCORRECT - will fail with duplicate content
+python3 forti_cert_swap.py --ssl-inspection-certificate --cert cert.pem --key key.pem --name old-cert-name
+
+# CORRECT - auto-generates name from certificate expiry
+python3 forti_cert_swap.py --ssl-inspection-certificate --cert cert.pem --key key.pem
 ```
 
 ## 🚀 Production Enhancements
@@ -229,19 +283,38 @@ For multiple certificates, consider:
 # Check current certificates
 python3 forti_cert_swap.py --rebind existing-cert-name --dry-run
 
-# Rollback to previous certificate
+# Rollback to previous certificate (GUI/SSL-VPN/FTM only)
 python3 forti_cert_swap.py --rebind previous-cert-name
 ```
 
-#### Failed Bindings
+#### Failed SSL Inspection Certificate Operations
 ```bash
-# Rebind to existing certificate
+# Check SSL inspection profiles and certificates
+python3 forti_cert_swap.py --ssl-inspection-certificate --cert current.pem --key current.key --dry-run
+
+# Manual SSL inspection profile rebinding (if needed)
+# Use FortiGate GUI: Security Profiles > SSL/SSH Inspection > [Profile] > Server Certificate
+```
+
+#### Failed Service Bindings
+```bash
+# Rebind GUI/SSL-VPN/FTM services to existing certificate
 python3 forti_cert_swap.py --rebind cert-name-20251108
 
 # Check binding status via FortiGate CLI
 # GUI: show system global | grep admin-server-cert
 # SSL-VPN: show vpn ssl settings | grep servercert
 # FTM: show system ftm-push | grep server-cert
+```
+
+#### SSL Inspection Profile Issues
+```bash
+# Verify SSL inspection profile mappings
+# FortiGate CLI: show firewall ssl-ssh-profile [profile-name]
+# Look for server-cert array entries
+
+# Check certificate domain matching
+# Ensure certificate CN/SAN matches expected domain
 ```
 
 ## 📋 Deployment Checklist
@@ -254,6 +327,9 @@ python3 forti_cert_swap.py --rebind cert-name-20251108
 - [ ] Backup procedures in place
 - [ ] Monitoring configured
 - [ ] Test certificates available
+- [ ] SSL inspection profiles identified (if using SSL inspection modes)
+- [ ] Certificate domain matching verified
+- [ ] FortiGate duplicate content limitations understood
 
 ### Deployment
 - [ ] Deploy in dry-run mode first
@@ -262,6 +338,9 @@ python3 forti_cert_swap.py --rebind cert-name-20251108
 - [ ] Monitor logs during deployment
 - [ ] Verify all bindings successful
 - [ ] Test FortiGate services (GUI, SSL-VPN)
+- [ ] Verify SSL inspection profile rebinding (if applicable)
+- [ ] Test SSL inspection functionality
+- [ ] Confirm certificate naming follows expected pattern
 
 ### Post-deployment
 - [ ] Monitor error rates
@@ -270,6 +349,9 @@ python3 forti_cert_swap.py --rebind cert-name-20251108
 - [ ] Update documentation
 - [ ] Schedule regular maintenance
 - [ ] Review and rotate API tokens
+- [ ] Validate SSL inspection certificate workflows
+- [ ] Document SSL inspection profile mappings
+- [ ] Test certificate renewal automation
 
 ## 🔄 Automation & Scheduling
 
