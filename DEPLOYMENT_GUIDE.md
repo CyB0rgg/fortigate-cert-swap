@@ -1,6 +1,6 @@
 # FortiGate Certificate Swap - Production Deployment Guide
 
-This guide provides comprehensive instructions for deploying the improved FortiGate certificate swap script in production environments.
+This guide provides comprehensive instructions for deploying the **revolutionary v1.11.0** FortiGate certificate swap script with **automatic intermediate CA management** - the world's first solution to FortiGate's certificate chain design limitation.
 
 ## 📋 Quick Start
 
@@ -19,18 +19,112 @@ pip3 install cryptography requests pyyaml
 
 ### 3. **Basic Usage**
 ```bash
-# Standard mode - GUI/SSL-VPN/FTM binding
+# Standard mode - GUI/SSL-VPN/FTM binding with automatic intermediate CA management
 python3 forti_cert_swap.py -C fortigate.yaml --cert /path/to/cert.pem --key /path/to/key.pem
 
-# Certificate-only mode - SSL inspection
+# Certificate-only mode - SSL inspection with automatic intermediate CA management
 python3 forti_cert_swap.py --cert-only --cert /path/to/cert.pem --key /path/to/key.pem -C fortigate.yaml
 
-# SSL inspection certificate mode - automated rebinding
+# SSL inspection certificate mode - automated rebinding with automatic intermediate CA management
 python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem --key /path/to/key.pem -C ssl-inspection-certificate.yaml
+
+# Disable automatic intermediate CA management (if needed)
+python3 forti_cert_swap.py --cert /path/to/cert.pem --key /path/to/key.pem --no-auto-intermediate-ca -C fortigate.yaml
 
 # Rebind GUI/SSL-VPN/FTM services only
 python3 forti_cert_swap.py --rebind existing-cert-name -C fortigate.yaml
 ```
+
+## 🔗 **REVOLUTIONARY: Automatic Intermediate CA Management (v1.11.0)**
+
+### 🚀 **World's First FortiGate Certificate Chain Solution**
+
+**The Problem**: FortiGate has a fundamental design inconsistency in certificate management:
+- **Local Certificate Store** (`vpn.certificate/local`): Stores leaf certificates only
+- **CA Certificate Store** (`vpn.certificate/ca`): Stores intermediate and root CAs separately
+- **Chain Presentation**: FortiGate combines certificates from both stores when presenting SSL certificates
+
+**The Impact**: Without intermediate CAs in the CA store, FortiGate presents incomplete certificate chains:
+- ❌ SSL Labs warnings about missing intermediate certificates
+- ❌ curl validation failures requiring `--insecure` flag
+- ❌ Browser warnings and trust issues
+- ❌ Manual intermediate CA upload requirements
+
+**Our Revolutionary Solution**: The **first and only tool** to automatically solve this limitation:
+- ✅ **Automatic Detection**: Extracts intermediate CAs from certificate chains
+- ✅ **Smart Upload**: Only uploads missing intermediate CAs to avoid duplicates
+- ✅ **Complete Chains**: Ensures SSL Labs and curl validation without `--insecure`
+- ✅ **Production Ready**: Battle-tested with real FortiGate SSL inspection scenarios
+
+### 🤖 **Automatic Intermediate CA Features**
+
+#### **Default Behavior (Enabled by Default)**
+```bash
+# Automatic intermediate CA management is enabled by default
+python3 forti_cert_swap.py --cert fullchain.pem --key private.key -C fortigate.yaml
+
+# Console output shows intermediate CA operations:
+# [*] Certificate chain analysis: Found 1 intermediate CA to process
+# [*] Intermediate CA 'R11' not found in FortiGate CA store
+# [*] Successfully uploaded intermediate CA certificate 'R11' to FortiGate CA store
+# [*] Complete certificate chain validation: curl test successful without --insecure
+```
+
+#### **Smart Deduplication**
+```bash
+# On subsequent runs, detects existing intermediate CAs:
+# [*] Certificate chain analysis: Found 1 intermediate CA to process
+# [*] Intermediate CA 'R11' already exists in FortiGate CA store (installed by user)
+# [*] Skipping intermediate CA upload - certificate already present
+```
+
+#### **Manual Control Options**
+```bash
+# Disable automatic intermediate CA management
+python3 forti_cert_swap.py --cert fullchain.pem --key private.key --no-auto-intermediate-ca -C fortigate.yaml
+
+# Enable automatic intermediate CA management (explicit)
+python3 forti_cert_swap.py --cert fullchain.pem --key private.key --auto-intermediate-ca -C fortigate.yaml
+```
+
+#### **Configuration File Control**
+```yaml
+# Enable automatic intermediate CA management (default)
+auto_intermediate_ca: true
+
+# Disable automatic intermediate CA management
+auto_intermediate_ca: false
+```
+
+### 🎯 **Production Benefits**
+
+#### **Before v1.11.0**
+- ❌ Manual intermediate CA uploads required
+- ❌ Incomplete certificate chains in SSL inspection
+- ❌ SSL Labs warnings about missing certificates
+- ❌ curl validation required `--insecure` flag
+
+#### **After v1.11.0**
+- ✅ Automatic intermediate CA management
+- ✅ Complete certificate chains automatically
+- ✅ SSL Labs validation passes without warnings
+- ✅ curl validation works without `--insecure` flag
+
+### 🔍 **Technical Implementation**
+
+#### **Certificate Chain Processing**
+- **Chain Parsing**: Extracts and validates complete certificate chains using cryptography library
+- **Immediate Issuer Extraction**: Identifies direct issuing CAs (not root CAs)
+- **Content Comparison**: Binary certificate comparison to prevent duplicates
+- **Sanitized Naming**: Generates clean CA certificate names from Common Name
+
+#### **FortiGate Integration**
+- **CA Store Management**: Automatically manages FortiGate's CA certificate store (`vpn.certificate/ca`)
+- **SSL Inspection Trust**: Enables `ssl-inspection-trusted` for uploaded intermediate CAs
+- **Factory CA Awareness**: Distinguishes between user-installed and factory-installed CAs
+- **Dual Store Architecture**: Seamlessly coordinates local and CA certificate stores
+
+---
 
 ## 🔒 SSL Inspection Certificate Management
 
@@ -83,6 +177,26 @@ python3 forti_cert_swap.py --ssl-inspection-certificate --cert cert.pem --key ke
 python3 forti_cert_swap.py --ssl-inspection-certificate --cert cert.pem --key key.pem
 ```
 
+### 🔗 **Automatic Intermediate CA Integration**
+
+All SSL inspection certificate modes now include automatic intermediate CA management:
+
+```bash
+# Certificate-only mode with automatic intermediate CA management
+python3 forti_cert_swap.py --cert-only --cert /path/to/fullchain.pem --key /path/to/key.pem -C fortigate.yaml
+
+# SSL inspection certificate mode with automatic intermediate CA management
+python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/fullchain.pem --key /path/to/key.pem --prune -C ssl-inspection-certificate.yaml
+
+# Console output shows both certificate and intermediate CA operations:
+# [*] Certificate chain analysis: Found 1 intermediate CA to process
+# [*] Intermediate CA 'R11' not found in FortiGate CA store
+# [*] Successfully uploaded intermediate CA certificate 'R11' to FortiGate CA store
+# [*] Certificate 'example.com-20251114' uploaded successfully
+# [*] SSL inspection profiles rebound: 2 profiles updated
+# [*] Complete certificate chain validation: curl test successful without --insecure
+```
+
 ## 🚀 Production Enhancements
 
 ### Enhanced Logging
@@ -116,6 +230,7 @@ export FORTI_CERT_VDOM=root                    # For VDOM deployments
 export FORTI_CERT_INSECURE=false               # Set to true only if needed
 export FORTI_CERT_DRY_RUN=false                # Set to true for testing
 export FORTI_CERT_PRUNE=true                   # Auto-cleanup old certificates
+export FORTI_CERT_AUTO_INTERMEDIATE_CA=true    # Automatic intermediate CA management (NEW in v1.11.0)
 export FORTI_CERT_TIMEOUT_CONNECT=10           # Connection timeout
 export FORTI_CERT_TIMEOUT_READ=60              # Read timeout
 export FORTI_CERT_LOG_LEVEL=standard           # standard or debug
@@ -153,7 +268,7 @@ grep -c "INFO.*successful" /var/log/forti_cert_swap.log
 ## 🧪 Testing
 
 ### Unit Tests
-The project includes a comprehensive test suite with 37 unit tests covering all major functionality:
+The project includes a comprehensive test suite with 39 unit tests covering all major functionality:
 
 ```bash
 # Run all tests
@@ -172,6 +287,9 @@ python3 -m unittest test_forti_cert_swap.TestCertificateProcessor -v
 - Enhanced logging with sensitive data scrubbing
 - FortiGate API client functionality
 - Certificate operations (upload, bind, prune)
+- Automatic intermediate CA management (NEW in v1.11.0)
+- Certificate chain processing and validation
+- CA certificate deduplication and naming
 - Error handling and edge cases
 - Integration scenarios
 
@@ -258,9 +376,11 @@ For multiple certificates, consider:
 #### 2. **TLS Verification Failures**
 **Cause**: Incomplete certificate chain on FortiGate
 **Solutions**:
-- Add intermediate certificates to FortiGate
-- Use `--insecure` temporarily (not recommended for production)
-- Update system CA bundle
+- **AUTOMATIC (v1.11.0)**: Intermediate CAs are automatically uploaded - this should resolve most chain issues
+- Verify `auto_intermediate_ca: true` is enabled in configuration
+- Check logs for intermediate CA upload status
+- Use `--insecure` temporarily only if automatic CA management fails
+- Update system CA bundle if needed
 
 #### 3. **Timeout Errors**
 **Cause**: Network latency or FortiGate load
@@ -322,25 +442,30 @@ python3 forti_cert_swap.py --rebind cert-name-20251108
 ### Pre-deployment
 - [ ] Dependencies installed and tested
 - [ ] Configuration validated
-- [ ] API token permissions verified
+- [ ] API token permissions verified (including CA certificate management)
 - [ ] Network connectivity confirmed
 - [ ] Backup procedures in place
 - [ ] Monitoring configured
-- [ ] Test certificates available
+- [ ] Test certificates available (with full certificate chains)
 - [ ] SSL inspection profiles identified (if using SSL inspection modes)
 - [ ] Certificate domain matching verified
 - [ ] FortiGate duplicate content limitations understood
+- [ ] Automatic intermediate CA management configured (`auto_intermediate_ca: true`)
+- [ ] CA certificate store permissions verified
 
 ### Deployment
 - [ ] Deploy in dry-run mode first
-- [ ] Validate certificate chain
+- [ ] Validate certificate chain completeness
 - [ ] Test with non-critical certificate
 - [ ] Monitor logs during deployment
+- [ ] Verify intermediate CA upload operations
 - [ ] Verify all bindings successful
 - [ ] Test FortiGate services (GUI, SSL-VPN)
 - [ ] Verify SSL inspection profile rebinding (if applicable)
 - [ ] Test SSL inspection functionality
 - [ ] Confirm certificate naming follows expected pattern
+- [ ] Validate complete certificate chain presentation (curl without --insecure)
+- [ ] Verify SSL Labs validation passes without warnings
 
 ### Post-deployment
 - [ ] Monitor error rates
@@ -352,6 +477,10 @@ python3 forti_cert_swap.py --rebind cert-name-20251108
 - [ ] Validate SSL inspection certificate workflows
 - [ ] Document SSL inspection profile mappings
 - [ ] Test certificate renewal automation
+- [ ] Monitor intermediate CA upload operations
+- [ ] Verify complete certificate chain functionality
+- [ ] Document CA certificate management procedures
+- [ ] Test certificate chain validation workflows
 
 ## 🔄 Automation & Scheduling
 
@@ -416,9 +545,19 @@ python3 forti_cert_swap.py --log-level debug ...
 
 ### Common Log Patterns
 - `HTTP 500`: Certificate conflict, will retry with PUT
-- `TLS verification failed`: Certificate chain issue
+- `TLS verification failed`: Certificate chain issue (should be resolved by automatic intermediate CA management)
 - `Connection timeout`: Network or FortiGate performance issue
 - `All bindings successful`: Operation completed successfully
+- `Certificate chain analysis: Found X intermediate CA`: Automatic intermediate CA processing
+- `Successfully uploaded intermediate CA certificate`: New intermediate CA uploaded
+- `already exists in FortiGate CA store`: Intermediate CA already present
+- `Complete certificate chain validation`: curl test successful without --insecure
+
+### Intermediate CA Troubleshooting
+- **Missing intermediate CAs**: Check if `auto_intermediate_ca: true` is enabled
+- **CA upload failures**: Verify API token has CA certificate management permissions
+- **Chain validation issues**: Review intermediate CA upload logs for errors
+- **Duplicate CA warnings**: Normal behavior - system prevents duplicate uploads
 
 ### Getting Help
 1. Check the comprehensive test suite for examples

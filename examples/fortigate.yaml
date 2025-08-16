@@ -1,12 +1,34 @@
-# Example FortiGate config
-host: fortigate.kiroshi.group
-port: 8443
-token: "REPLACE_WITH_YOUR_API_TOKEN"
-# vdom: "root"        # omit for GLOBAL store
-insecure: true
-dry_run: false
-prune: true
-timeout_connect: 5
-timeout_read: 30
-log: "~/logs/forti_cert_swap-deploy.log"
-log_level: "debug"    # standard | debug
+# FortiGate Certificate Swap Configuration
+# This configuration file contains all available settings for the FortiGate certificate management tool.
+# CLI arguments take precedence over these settings.
+
+# === FortiGate Connection Settings ===
+host: fortigate.kiroshi.group          # FortiGate hostname or IP address
+port: 8443                             # HTTPS management port (typically 443 or 8443)
+token: "REPLACE_WITH_YOUR_API_TOKEN"   # REST API token (generate in System > Administrators)
+
+# === Certificate Store Selection ===
+# vdom: "root"                         # Specify VDOM name for VDOM store, omit for GLOBAL store
+
+# === Security Settings ===
+insecure: false                        # TLS certificate verification (default: false)
+                                       # Set to true only if FortiGate uses self-signed certificates
+                                       # The tool will guide you if TLS verification fails
+
+# === Operation Modes ===
+dry_run: false                         # Preview changes without applying them (default: false)
+prune: true                            # Delete old certificates after successful operations (default: false)
+                                       # Only deletes certificates not bound to any services
+
+# === Automatic Features (v1.11.0) ===
+# auto_intermediate_ca: true           # Automatically upload missing intermediate CA certificates
+                                       # This is enabled by default - no need to specify unless disabling
+                                       # Use --no-auto-intermediate-ca to disable if needed
+
+# === Network Timeouts ===
+timeout_connect: 5                     # Connection timeout in seconds (default: 5)
+timeout_read: 30                       # Read timeout in seconds (default: 30)
+
+# === Logging Configuration ===
+log: "~/logs/forti_cert_swap-deploy.log"  # Log file path (optional)
+log_level: "standard"                  # Log verbosity: "standard" or "debug" (default: standard)

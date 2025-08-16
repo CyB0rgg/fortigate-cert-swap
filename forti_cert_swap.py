@@ -19,7 +19,7 @@
 #  - Operation correlation IDs for debugging
 #  - Sensitive data scrubbing in logs for security
 #
-# Version: 1.10.0
+# Version: 1.11.0
 #
 # MIT License
 # Copyright (c) 2025 CyB0rgg <dev@bluco.re>
@@ -68,7 +68,7 @@ if missing_msgs:
         sys.exit(1)
 
 API_PREFIX = "/api/v2"
-VERSION = "1.10.0"
+VERSION = "1.11.0"
 
 # ---------------------------
 # Configuration & Validation
@@ -99,6 +99,7 @@ class Config:
     rebind: Optional[str] = None
     cert_only: bool = False
     ssl_inspection_cert: bool = False
+    auto_intermediate_ca: bool = True
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -455,6 +456,60 @@ class CertificateProcessor:
         """Extract base name from certificate name."""
         match = re.match(r"^(.*)-\d{8}$", name)
         return match.group(1) if match else name
+
+    @staticmethod
+    def extract_immediate_issuing_ca(cert_pem: str) -> Optional[Dict[str, Any]]:
+        """Extract immediate issuing CA certificate (position 1 in chain)."""
+        try:
+            chunks = CertificateProcessor._split_pem_chain(cert_pem)
+            
+            # Need at least 2 certificates (leaf + immediate issuing CA)
+            if len(chunks) < 2:
+                return None
+            
+            # Get immediate issuing CA (position 1)
+            issuing_ca_pem = chunks[1]
+            cert = x509.load_pem_x509_certificate(issuing_ca_pem.encode("utf-8"), default_backend())
+            
+            # Extract Common Name
+            common_name = None
+            for attr in cert.subject:
+                if attr.oid == NameOID.COMMON_NAME:
+                    common_name = attr.value
+                    break
+            
+            if not common_name:
+                return None
+            
+            return {
+                'pem_content': issuing_ca_pem,
+                'common_name': common_name,
+                'subject': cert.subject.rfc4514_string(),
+                'issuer': cert.issuer.rfc4514_string(),
+                'serial_number': str(cert.serial_number)
+            }
+            
+        except Exception as e:
+            # Return None if extraction fails - this is expected for single certificates
+            return None
+
+    @staticmethod
+    def sanitize_ca_certificate_name(common_name: str) -> str:
+        """Sanitize CA Common Name for FortiGate compatibility."""
+        # Remove special characters and spaces, replace with hyphens
+        sanitized = re.sub(r'[^A-Za-z0-9._-]', '-', common_name)
+        
+        # Remove multiple consecutive hyphens
+        sanitized = re.sub(r'-+', '-', sanitized)
+        
+        # Remove leading/trailing hyphens
+        sanitized = sanitized.strip('-')
+        
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = "CA-Certificate"
+        
+        return sanitized
 
 # ---------------------------
 # Configuration Management
@@ -1171,6 +1226,180 @@ class CertificateOperations:
         except Exception:
             return None
 
+    def get_all_ca_certificates(self) -> Dict[str, Dict[str, Any]]:
+        """Get all CA certificates from FortiGate (user and factory)."""
+        ca_certificates = {}
+        
+        try:
+            params = _scope_params("global" if self.config.store == "GLOBAL" else "vdom", self.config.vdom)
+            code, data = self.api.cmdb_get("vpn.certificate/ca", params=params)
+            
+            if code == 200 and isinstance(data, dict):
+                results = data.get("results") or data.get("data") or []
+                for ca_cert in results:
+                    ca_name = ca_cert.get("name")
+                    ca_content = ca_cert.get("ca")
+                    ca_source = ca_cert.get("source", "unknown")
+                    
+                    if ca_name and ca_content:
+                        try:
+                            # Parse certificate to get metadata
+                            cert = x509.load_pem_x509_certificate(ca_content.encode("utf-8"), default_backend())
+                            
+                            # Extract Common Name
+                            common_name = None
+                            for attr in cert.subject:
+                                if attr.oid == NameOID.COMMON_NAME:
+                                    common_name = attr.value
+                                    break
+                            
+                            ca_certificates[ca_name] = {
+                                'content': ca_content,
+                                'common_name': common_name or ca_name,
+                                'subject': cert.subject.rfc4514_string(),
+                                'serial_number': str(cert.serial_number),
+                                'source': ca_source
+                            }
+                            
+                        except Exception as e:
+                            self.logger.debug(f"Failed to parse CA certificate {ca_name}: {e}")
+                            # Store basic info even if parsing fails
+                            ca_certificates[ca_name] = {
+                                'content': ca_content,
+                                'common_name': ca_name,
+                                'subject': 'unknown',
+                                'serial_number': 'unknown',
+                                'source': ca_source
+                            }
+            
+        except Exception as e:
+            self.logger.warn(f"Failed to get CA certificates: {e}")
+        
+        return ca_certificates
+
+    def compare_certificates(self, cert1_content: str, cert2_content: str) -> bool:
+        """Compare two certificates by serial number and content hash."""
+        try:
+            # Parse both certificates
+            cert1 = x509.load_pem_x509_certificate(cert1_content.encode("utf-8"), default_backend())
+            cert2 = x509.load_pem_x509_certificate(cert2_content.encode("utf-8"), default_backend())
+            
+            # Compare by serial number (most reliable)
+            if cert1.serial_number == cert2.serial_number:
+                return True
+            
+            # Fallback to content hash comparison
+            import hashlib
+            hash1 = hashlib.sha256(cert1_content.encode("utf-8")).hexdigest()
+            hash2 = hashlib.sha256(cert2_content.encode("utf-8")).hexdigest()
+            
+            return hash1 == hash2
+            
+        except Exception as e:
+            self.logger.debug(f"Certificate comparison failed: {e}")
+            return False
+
+    def upload_ca_certificate(self, ca_name: str, ca_content: str) -> Tuple[str, Any]:
+        """Upload CA certificate to FortiGate."""
+        params = _scope_params("global" if self.config.store == "GLOBAL" else "vdom", self.config.vdom)
+        payload = {
+            "name": ca_name,
+            "ca": ca_content,
+            "range": self.config.store.lower(),
+            "ssl-inspection-trusted": "enable"  # Enable for SSL inspection
+        }
+        
+        if self.config.dry_run:
+            self.logger.info(f"DRYRUN: would POST vpn.certificate/ca name={ca_name} store={self.config.store}")
+            return "dry_run", {"would_post": True, "path": "vpn.certificate/ca", "params": params}
+        
+        # Try POST (create new CA certificate)
+        code, data = self.api.cmdb_post("vpn.certificate/ca", payload, params=params)
+        if code == 200:
+            return "created", data
+        
+        # Try PUT (update existing CA certificate)
+        code, data = self.api.cmdb_put(f"vpn.certificate/ca/{ca_name}", payload, params=params)
+        if code == 200:
+            return "updated", data
+        
+        return "error", {"http_status": code, "detail": data}
+
+    def upload_missing_intermediate_ca_if_needed(self, cert_pem: str) -> Optional[Dict[str, Any]]:
+        """Upload immediate issuing CA if missing from FortiGate."""
+        if not self.config.auto_intermediate_ca:
+            self.logger.debug("Automatic intermediate CA upload disabled")
+            return None
+        
+        # Extract immediate issuing CA
+        issuing_ca = CertificateProcessor.extract_immediate_issuing_ca(cert_pem)
+        if not issuing_ca:
+            self.logger.debug("No intermediate CA found in certificate chain")
+            return None
+        
+        self.logger.debug(f"Found immediate issuing CA: {issuing_ca['common_name']} (serial: {issuing_ca['serial_number']})")
+        
+        # Get all existing CA certificates
+        existing_cas = self.get_all_ca_certificates()
+        self.logger.debug(f"Retrieved {len(existing_cas)} existing CA certificates from FortiGate")
+        
+        # Check if this CA already exists
+        for ca_name, ca_info in existing_cas.items():
+            if self.compare_certificates(issuing_ca['pem_content'], ca_info['content']):
+                self.logger.debug(f"Intermediate CA already exists: {ca_name} (source: {ca_info['source']}, serial: {ca_info['serial_number']})")
+                return {
+                    "name": ca_name,
+                    "state": "exists",
+                    "source": ca_info['source'],
+                    "common_name": issuing_ca['common_name']
+                }
+        
+        # CA doesn't exist, need to upload it
+        sanitized_name = CertificateProcessor.sanitize_ca_certificate_name(issuing_ca['common_name'])
+        
+        # Ensure unique name if sanitized name already exists
+        original_name = sanitized_name
+        counter = 1
+        while sanitized_name in existing_cas:
+            sanitized_name = f"{original_name}-{counter}"
+            counter += 1
+        
+        self.logger.debug(f"Uploading intermediate CA: {sanitized_name} (CN: {issuing_ca['common_name']}, serial: {issuing_ca['serial_number']})")
+        
+        try:
+            state, detail = self.upload_ca_certificate(sanitized_name, issuing_ca['pem_content'])
+            
+            if state == "dry_run":
+                self.logger.info(f"DRYRUN: would POST vpn.certificate/ca name={sanitized_name} store={self.config.store}")
+                return {
+                    "name": sanitized_name,
+                    "state": "dry_run",
+                    "common_name": issuing_ca['common_name'],
+                    "detail": detail
+                }
+            
+            if state in ["created", "updated"]:
+                http_code = detail.get('http_status', 200) if isinstance(detail, dict) else 200
+                method = 'cmdb_post' if state == 'created' else 'cmdb_put'
+                self.logger.info(f"{'Created' if state == 'created' else 'Updated'} intermediate CA certificate: {sanitized_name} (via {method}, HTTP {http_code})")
+                return {
+                    "name": sanitized_name,
+                    "state": state,
+                    "common_name": issuing_ca['common_name'],
+                    "http_status": http_code,
+                    "method": method
+                }
+            else:
+                http_code = detail.get('http_status', 'unknown') if isinstance(detail, dict) else 'unknown'
+                self.logger.warn(f"Failed to upload intermediate CA {sanitized_name}: HTTP {http_code}")
+                self.logger.debug(f"Upload failure detail: {detail}")
+                return None
+                
+        except Exception as e:
+            self.logger.warn(f"Exception uploading intermediate CA {sanitized_name}: {e}")
+            self.logger.debug(f"Exception details", context={"error": str(e), "ca_name": sanitized_name})
+            return None
+
 # ---------------------------
 # Main Application
 # ---------------------------
@@ -1223,9 +1452,16 @@ class FortiCertSwap:
         mode_group.add_argument("--ssl-inspection-certificate", dest="ssl_inspection_cert", action="store_true",
                                help="Upload certificate with standard naming and rebind SSL inspection profiles")
         
+        # Intermediate CA management
+        ca_group = parser.add_mutually_exclusive_group()
+        ca_group.add_argument("--auto-intermediate-ca", dest="auto_intermediate_ca", action="store_true", default=True,
+                             help="Automatically upload missing intermediate CA certificates (default: enabled)")
+        ca_group.add_argument("--no-auto-intermediate-ca", dest="auto_intermediate_ca", action="store_false",
+                             help="Disable automatic intermediate CA certificate upload")
+        
         # Logging
         parser.add_argument("--log", help="Write a plain log to this file")
-        parser.add_argument("--log-level", dest="log_level", 
+        parser.add_argument("--log-level", dest="log_level",
                           choices=["standard", "debug"], default="standard",
                           help="Log verbosity when --log is used (default: standard)")
         
@@ -1269,6 +1505,18 @@ class FortiCertSwap:
         print(f"[*] Planned certificate name: {planned_name}")
         self.logger.info(f"planned_name={planned_name}")
         
+        # Show planned intermediate CA if auto_intermediate_ca is enabled
+        if config.auto_intermediate_ca:
+            issuing_ca = CertificateProcessor.extract_immediate_issuing_ca(cert_pem)
+            if issuing_ca:
+                sanitized_ca_name = CertificateProcessor.sanitize_ca_certificate_name(issuing_ca['common_name'])
+                print(f"[*] Planned intermediate CA: {sanitized_ca_name} (CN: {issuing_ca['common_name']})")
+                self.logger.info(f"planned_intermediate_ca={sanitized_ca_name}")
+            else:
+                print(f"[*] No intermediate CA found in certificate chain")
+        else:
+            print(f"[*] Automatic intermediate CA upload: disabled")
+        
         return self._execute_certificate_operations(config, planned_name, cert_pem, key_pem)
 
     def run_rebind_mode(self, config: Config) -> Dict[str, Any]:
@@ -1298,6 +1546,18 @@ class FortiCertSwap:
         print(f"[*] Certificate-only mode: {planned_name}")
         print(f"[*] Target store: {config.store}")
         
+        # Show planned intermediate CA if auto_intermediate_ca is enabled
+        if config.auto_intermediate_ca:
+            issuing_ca = CertificateProcessor.extract_immediate_issuing_ca(cert_pem)
+            if issuing_ca:
+                sanitized_ca_name = CertificateProcessor.sanitize_ca_certificate_name(issuing_ca['common_name'])
+                print(f"[*] Planned intermediate CA: {sanitized_ca_name} (CN: {issuing_ca['common_name']})")
+                self.logger.info(f"planned_intermediate_ca={sanitized_ca_name}")
+            else:
+                print(f"[*] No intermediate CA found in certificate chain")
+        else:
+            print(f"[*] Automatic intermediate CA upload: disabled")
+        
         # Initialize API client
         api = FortiAPI(config, self.logger)
         cert_ops = CertificateOperations(api, config, self.logger)
@@ -1308,6 +1568,36 @@ class FortiCertSwap:
             "mode": "cert_only",
             "version": VERSION
         }
+        
+        # Upload intermediate CA if needed (before uploading the certificate)
+        intermediate_ca_result = cert_ops.upload_missing_intermediate_ca_if_needed(cert_pem)
+        if intermediate_ca_result:
+            ca_name = intermediate_ca_result["name"]
+            ca_state = intermediate_ca_result["state"]
+            ca_cn = intermediate_ca_result["common_name"]
+            
+            if ca_state == "exists":
+                ca_source = intermediate_ca_result.get("source", "unknown")
+                # Make source more user-friendly
+                if ca_source == "user":
+                    source_display = "installed by user"
+                elif ca_source == "factory":
+                    source_display = "factory installed"
+                else:
+                    source_display = ca_source
+                print(f"[*] Intermediate CA already exists: {ca_name} ({source_display})")
+                self.logger.info(f"Using existing intermediate CA: {ca_name} (CN: {ca_cn}, source: {ca_source})")
+            elif ca_state == "dry_run":
+                print(f"[*] DRYRUN: would upload intermediate CA: {ca_name}")
+                self.logger.info(f"DRYRUN: would upload intermediate CA: {ca_name} (CN: {ca_cn})")
+            elif ca_state in ["created", "updated"]:
+                http_code = intermediate_ca_result.get("http_status", "n/a")
+                method = intermediate_ca_result.get("method", "unknown")
+                action = "created new" if ca_state == "created" else "updated existing"
+                print(f"[*] Result: {action} intermediate CA \"{ca_name}\" in {config.store} store (via {method}, HTTP {http_code})")
+                self.logger.info(f"Intermediate CA upload completed: {action} (HTTP {http_code})")
+            
+            result["intermediate_ca"] = ca_name
         
         # Upload certificate only (no bindings)
         try:
@@ -1371,6 +1661,18 @@ class FortiCertSwap:
         print(f"[*] SSL inspection certificate mode: {planned_name}")
         print(f"[*] Target store: {config.store}")
         
+        # Show planned intermediate CA if auto_intermediate_ca is enabled
+        if config.auto_intermediate_ca:
+            issuing_ca = CertificateProcessor.extract_immediate_issuing_ca(cert_pem)
+            if issuing_ca:
+                sanitized_ca_name = CertificateProcessor.sanitize_ca_certificate_name(issuing_ca['common_name'])
+                print(f"[*] Planned intermediate CA: {sanitized_ca_name} (CN: {issuing_ca['common_name']})")
+                self.logger.info(f"planned_intermediate_ca={sanitized_ca_name}")
+            else:
+                print(f"[*] No intermediate CA found in certificate chain")
+        else:
+            print(f"[*] Automatic intermediate CA upload: disabled")
+        
         # Initialize API client
         api = FortiAPI(config, self.logger)
         cert_ops = CertificateOperations(api, config, self.logger)
@@ -1409,6 +1711,36 @@ class FortiCertSwap:
             self.logger.warn(f"No SSL inspection profiles found for domain {upload_domain}")
         else:
             print(f"[*] Found {len(profiles_to_rebind)} SSL inspection profile(s) to rebind: {', '.join(profiles_to_rebind)}")
+        
+        # Upload intermediate CA if needed (before uploading the certificate)
+        intermediate_ca_result = cert_ops.upload_missing_intermediate_ca_if_needed(cert_pem)
+        if intermediate_ca_result:
+            ca_name = intermediate_ca_result["name"]
+            ca_state = intermediate_ca_result["state"]
+            ca_cn = intermediate_ca_result["common_name"]
+            
+            if ca_state == "exists":
+                ca_source = intermediate_ca_result.get("source", "unknown")
+                # Make source more user-friendly
+                if ca_source == "user":
+                    source_display = "installed by user"
+                elif ca_source == "factory":
+                    source_display = "factory installed"
+                else:
+                    source_display = ca_source
+                print(f"[*] Intermediate CA already exists: {ca_name} ({source_display})")
+                self.logger.info(f"Using existing intermediate CA: {ca_name} (CN: {ca_cn}, source: {ca_source})")
+            elif ca_state == "dry_run":
+                print(f"[*] DRYRUN: would upload intermediate CA: {ca_name}")
+                self.logger.info(f"DRYRUN: would upload intermediate CA: {ca_name} (CN: {ca_cn})")
+            elif ca_state in ["created", "updated"]:
+                http_code = intermediate_ca_result.get("http_status", "n/a")
+                method = intermediate_ca_result.get("method", "unknown")
+                action = "created new" if ca_state == "created" else "updated existing"
+                print(f"[*] Result: {action} intermediate CA \"{ca_name}\" in {config.store} store (via {method}, HTTP {http_code})")
+                self.logger.info(f"Intermediate CA upload completed: {action} (HTTP {http_code})")
+            
+            result["intermediate_ca"] = ca_name
         
         # Upload new certificate
         try:
@@ -1490,6 +1822,36 @@ class FortiCertSwap:
         
         # Upload certificate (if not rebind mode)
         if cert_pem and key_pem:
+            # Upload intermediate CA if needed (before uploading the certificate)
+            intermediate_ca_result = cert_ops.upload_missing_intermediate_ca_if_needed(cert_pem)
+            if intermediate_ca_result:
+                ca_name = intermediate_ca_result["name"]
+                ca_state = intermediate_ca_result["state"]
+                ca_cn = intermediate_ca_result["common_name"]
+                
+                if ca_state == "exists":
+                    ca_source = intermediate_ca_result.get("source", "unknown")
+                    # Make source more user-friendly
+                    if ca_source == "user":
+                        source_display = "installed by user"
+                    elif ca_source == "factory":
+                        source_display = "factory installed"
+                    else:
+                        source_display = ca_source
+                    print(f"[*] Intermediate CA already exists: {ca_name} ({source_display})")
+                    self.logger.info(f"Using existing intermediate CA: {ca_name} (CN: {ca_cn}, source: {ca_source})")
+                elif ca_state == "dry_run":
+                    print(f"[*] DRYRUN: would upload intermediate CA: {ca_name}")
+                    self.logger.info(f"DRYRUN: would upload intermediate CA: {ca_name} (CN: {ca_cn})")
+                elif ca_state in ["created", "updated"]:
+                    http_code = intermediate_ca_result.get("http_status", "n/a")
+                    method = intermediate_ca_result.get("method", "unknown")
+                    action = "created new" if ca_state == "created" else "updated existing"
+                    print(f"[*] Result: {action} intermediate CA \"{ca_name}\" in {config.store} store (via {method}, HTTP {http_code})")
+                    self.logger.info(f"Intermediate CA upload completed: {action} (HTTP {http_code})")
+                
+                result["intermediate_ca"] = ca_name
+            
             try:
                 state, detail = cert_ops.upload_or_update_cert(cert_name, cert_pem, key_pem)
             except APIError as e:
@@ -1588,6 +1950,27 @@ class FortiCertSwap:
         try:
             # Parse arguments
             args = self.parse_arguments()
+            
+            # Check if no arguments provided (show help)
+            if len(sys.argv) == 1:
+                print("FortiGate Certificate Swap v1.11.0")
+                print("Upload/rotate FortiGate certificates with automatic intermediate CA management")
+                print("")
+                print("Usage examples:")
+                print("  # Standard certificate upload with GUI/SSL-VPN/FTM binding")
+                print("  forti_cert_swap.py --cert fullchain.pem --key private.key -C config.yaml")
+                print("")
+                print("  # Certificate-only upload (no service bindings)")
+                print("  forti_cert_swap.py --cert-only --cert fullchain.pem --key private.key -C config.yaml")
+                print("")
+                print("  # SSL inspection certificate with automated rebinding")
+                print("  forti_cert_swap.py --ssl-inspection-certificate --cert fullchain.pem --key private.key -C config.yaml")
+                print("")
+                print("  # Rebind existing certificate to services")
+                print("  forti_cert_swap.py --rebind existing-cert-name -C config.yaml")
+                print("")
+                print("For detailed help: forti_cert_swap.py --help")
+                return 0
             
             # Load and merge configuration
             yaml_config = ConfigManager.load_yaml_config(args.config)

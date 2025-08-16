@@ -546,15 +546,21 @@ class TestFortiCertSwapIntegration(unittest.TestCase):
         """Test configuration error handling."""
         app = FortiCertSwap()
         
-        # Mock invalid arguments
+        # Test no arguments (should show usage and exit 0)
+        with patch('forti_cert_swap.sys.argv', ['forti_cert_swap.py']):
+            exit_code = app.run()
+            self.assertEqual(exit_code, 0)
+        
+        # Test actual configuration error (should exit 1)
         with patch.object(app, 'parse_arguments') as mock_parse:
             mock_parse.return_value = Mock(config=None)
             
             with patch.object(ConfigManager, 'merge_args_with_config') as mock_merge:
                 mock_merge.side_effect = ConfigurationError("Test error")
                 
-                exit_code = app.run()
-                self.assertEqual(exit_code, 1)
+                with patch('forti_cert_swap.sys.argv', ['forti_cert_swap.py', '--host', 'test']):
+                    exit_code = app.run()
+                    self.assertEqual(exit_code, 1)
 
 
 class TestUtilityFunctions(unittest.TestCase):

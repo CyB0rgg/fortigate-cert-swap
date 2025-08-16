@@ -1,37 +1,54 @@
-# Example FortiGate config for SSL inspection certificate mode
-# This configuration is optimized for automated SSL inspection certificate swapping
-# with standard naming, profile rebinding, and optional pruning
+# FortiGate SSL Inspection Certificate Configuration
+# This configuration is optimized for automated SSL inspection certificate management
+# with standard naming, automatic profile rebinding, and enhanced certificate chain handling.
 
-# FortiGate connection settings
-host: fortigate.example.com
-port: 8443
-token: "YOUR_API_TOKEN_HERE"
+# === FortiGate Connection Settings ===
+host: fortigate.example.com           # FortiGate hostname or IP address
+port: 8443                            # HTTPS management port (typically 443 or 8443)
+token: "YOUR_API_TOKEN_HERE"          # REST API token (generate in System > Administrators)
 
-# Certificate store (omit vdom for GLOBAL, or specify VDOM name)
-# vdom: "root"
+# === Certificate Store Selection ===
+# vdom: "root"                         # Specify VDOM name for VDOM store, omit for GLOBAL store
 
-# Security settings
-insecure: true        # Use if FortiGate has self-signed cert
-dry_run: false        # Set to true for testing
+# === Security Settings ===
+insecure: false                        # TLS certificate verification (default: false)
+                                       # Set to true only if FortiGate uses self-signed certificates
+                                       # The tool will guide you if TLS verification fails
 
-# SSL inspection certificate mode settings
-# This mode uploads certificates with standard naming and automatically
-# rebinds SSL inspection profiles based on domain matching
-ssl_inspection_cert: true
+# === Operation Mode ===
+dry_run: false                         # Preview changes without applying them (default: false)
+                                       # Recommended for initial testing
 
-# Pruning settings (optional)
-# prune: true         # Delete old SSL inspection certificates after successful rebinding
+# === SSL Inspection Certificate Mode ===
+# This mode is activated via command line: --ssl-inspection-certificate
+# It performs the following automated workflow:
+# 1. Upload certificate with standard naming (domain-YYYYMMDD format)
+# 2. Automatically upload missing intermediate CA certificates for complete chains
+# 3. Find SSL inspection profiles using certificates for the same domain
+# 4. Rebind those profiles to use the new certificate
+# 5. Optionally prune old certificates if --prune is enabled
 
-# Timeouts (seconds)
-timeout_connect: 10
-timeout_read: 60
+# === Pruning Settings ===
+prune: true                            # Delete old certificates after successful operations (default: false)
+                                       # Only deletes certificates with same domain, older expiry, and no service bindings
+                                       # Highly recommended for SSL inspection certificate management
 
-# Logging (recommended for production)
-log: "~/logs/ssl-inspection-cert-update.log"
-log_level: "standard"  # or "debug" for detailed logging
+# === Automatic Features (v1.11.0) ===
+# auto_intermediate_ca: true           # Automatically upload missing intermediate CA certificates
+                                       # This is enabled by default - no need to specify unless disabling
+                                       # Ensures complete certificate chains for SSL inspection
 
-# Note: This mode will:
-# 1. Upload certificate with standard naming (domain-YYYYMMDD)
-# 2. Find SSL inspection profiles using certificates for the same domain
-# 3. Rebind those profiles to use the new certificate
-# 4. Optionally prune old certificates if --prune is enabled
+# === Network Timeouts ===
+timeout_connect: 10                    # Connection timeout in seconds (default: 5)
+timeout_read: 60                       # Read timeout in seconds (default: 30)
+                                       # Higher timeouts recommended for SSL inspection operations
+
+# === Logging Configuration ===
+log: "~/logs/ssl-inspection-cert-update.log"  # Log file path (recommended for production)
+log_level: "standard"                  # Log verbosity: "standard" or "debug" (default: standard)
+                                       # Use "debug" for troubleshooting SSL inspection profile issues
+
+# === Usage Example ===
+# python3 forti_cert_swap.py --ssl-inspection-certificate \
+#   --cert /path/to/fullchain.pem --key /path/to/private.key \
+#   --prune -C ssl-inspection-certificate.yaml

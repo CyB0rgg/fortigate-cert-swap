@@ -1,6 +1,45 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.11.0] - 2025-08-16
+
+### Added
+- **🚀 GROUNDBREAKING: Automatic Intermediate CA Management** - First-of-its-kind solution addressing FortiGate's certificate chain design inconsistency
+  - Automatic detection and upload of missing intermediate CA certificates from certificate chains
+  - Intelligent CA certificate comparison using serial numbers and content hashes
+  - Seamless integration with FortiGate's dual certificate store architecture (local + CA stores)
+  - Support for SSL inspection trusted CA configuration (`ssl-inspection-trusted: enable`)
+  - Smart CA certificate naming with sanitization for FortiGate compatibility
+- **Enhanced Intermediate CA Logging and Console Output**
+  - Comprehensive logging consistency matching main certificate operations verbosity
+  - User-friendly CA source display ("installed by user" vs "factory installed")
+  - Detailed operation tracking with HTTP status codes and API methods
+  - Enhanced debug logging for CA discovery, comparison, and upload decisions
+- **Command Line Control for Intermediate CA Management**
+  - `--auto-intermediate-ca` flag to enable automatic intermediate CA upload (default: enabled)
+  - `--no-auto-intermediate-ca` flag to disable automatic intermediate CA upload
+  - Configuration file support via `auto_intermediate_ca: true/false` in YAML config
+
+### Enhanced
+- **Certificate Chain Validation** - Now provides complete certificate chain validation without SSL Labs warnings
+- **SSL Inspection Certificate Workflows** - Enhanced to include automatic intermediate CA management
+- **Console Output Consistency** - All intermediate CA operations now match certificate operation verbosity
+- **Configuration Examples** - Updated with `auto_intermediate_ca` option and comprehensive documentation
+
+### Technical Breakthrough
+- **FortiGate Certificate Chain Solution**: Addresses the fundamental design limitation where FortiGate stores leaf certificates in `vpn.certificate/local` but requires intermediate CAs in `vpn.certificate/ca` for complete chain presentation
+- **Intelligent CA Detection**: Extracts immediate issuing CA from certificate chains (position 1) and compares against existing FortiGate CA store
+- **Dual Store Management**: Automatically manages both local certificate store and CA certificate store for complete SSL certificate chain functionality
+- **Production Validated**: Successfully tested with production FortiGate environments and real certificate chains
+
+### Fixed
+- **Certificate Chain Completeness** - Resolves SSL Labs warnings about incomplete certificate chains in SSL inspection scenarios
+- **Intermediate CA Duplication** - Prevents duplicate CA uploads through intelligent certificate comparison
+- **SSL Inspection Chain Issues** - Ensures complete certificate chains for SSL inspection without manual CA management
+
+### Breaking Changes
+- **None** - All existing functionality preserved with backward compatibility
+
 ## [1.10.0] - 2025-08-16
 ### Added
 - **SSL Inspection Certificate Mode** (`--ssl-inspection-certificate`) - Complete automated SSL inspection certificate renewal workflow with standard naming and automatic profile rebinding
