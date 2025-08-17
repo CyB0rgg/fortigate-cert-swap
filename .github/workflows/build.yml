@@ -88,35 +88,6 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
-        body: |
-          ## FortiGate Certificate Swap - Go Edition
-          
-          **Revolutionary Performance**: 13.4x faster than Python version (0.026s vs 0.348s startup)
-          
-          ### Features
-          - 🚀 **World's First Automatic Intermediate CA Management**
-          - 🔒 **SSL Inspection Certificate Mode** with automated profile rebinding
-          - 🎯 **Smart Certificate Pruning** with service binding checks
-          - 📊 **Professional Console Output** with colors and progress indicators
-          - 🔧 **Zero Dependencies** - Single native binary
-          - 🌐 **Cross-Platform** - Linux, macOS, Windows (x64/ARM64)
-          
-          ### Download the right binary for your platform:
-          - **Linux x64**: `fortigate-cert-swap-linux-amd64`
-          - **Linux ARM64**: `fortigate-cert-swap-linux-arm64`
-          - **macOS Intel**: `fortigate-cert-swap-darwin-amd64`
-          - **macOS Apple Silicon**: `fortigate-cert-swap-darwin-arm64`
-          - **Windows x64**: `fortigate-cert-swap-windows-x64.exe`
-          
-          ### Quick Start
-          ```bash
-          # Make executable (Linux/macOS)
-          chmod +x fortigate-cert-swap-*
-          
-          # Run with your certificates
-          ./fortigate-cert-swap-linux-amd64 --host your-fortigate.com --token your-api-token --cert cert.pem --key key.pem
-          ```
-          
-          See [README.md](https://github.com/CyB0rgg/fortigate-cert-swap/blob/main/README.md) for complete documentation.
+        body_path: RELEASE_NOTES.md
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,38 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [2.0.1] - 2025-08-17
+
+### 🎨 UX IMPROVEMENTS: Professional Console Output
+
+**PERFECT CONSISTENCY**: 100% consistent status indicator formatting across all operations
+
+### Fixed
+- **Console Output Consistency** - Fixed all 29 inconsistent status indicator formatting issues
+  - All `[*]` informational messages now use consistent bold white formatting
+  - All `[✓]` success messages now use consistent bold white formatting
+  - All `[!]` warning messages now use consistent bold white formatting
+  - All `[✗]` error messages now use consistent bold white formatting
+- **Certificate Chain Summary** - Fixed inconsistent formatting in certificate chain display header
+- **Effective Configuration** - Fixed inconsistent formatting in configuration summary header
+- **CA Certificate Creation** - Now properly displays `[✓]` success indicator instead of `[*]`
+- **SSL Inspection Profile Rebinding** - Now properly displays `[✓]` success indicators instead of `[*]`
+- **Import Formatting** - Removed unprofessional empty line in imports section for cleaner code
+
+### Enhanced
+- **Professional Terminal Output** - Every status message now uses uniform bold white formatting for maximum readability
+- **Status Indicator System** - Implemented consistent semantic meaning:
+  - `[*]` = Ongoing actions/information (bold white)
+  - `[!]` = Warnings/failed operations (bold white)
+  - `[✗]` = Errors (bold white)
+  - `[✓]` = Completed/successful operations (bold white)
+- **Code Quality** - Professional import formatting and consistent code structure
+
+### Technical Improvements
+- **29 Formatting Fixes** - Systematically addressed every inconsistent `fmt.Printf` call
+- **Unified Print Functions** - All console output now uses consistent `printInfo()`, `printSuccess()`, `printWarning()`, `printError()` functions
+- **Terminal Compatibility** - Consistent formatting across all terminal environments and operating systems
+
 ## [2.0.0] - 2025-08-17
 
 ### 🚀 MAJOR RELEASE: Complete Go Rewrite

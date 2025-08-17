@@ -37,7 +37,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
 	"gopkg.in/yaml.v2"
 )
 
@@ -177,7 +176,7 @@ func (l *Logger) Debug(message string, context map[string]interface{}) {
 }
 
 const (
-	VERSION    = "2.0.0"
+	VERSION    = "2.0.1"
 	API_PREFIX = "/api/v2"
 )
 
@@ -210,27 +209,27 @@ func colorize(color, text string) string {
 }
 
 func printSuccess(msg string) {
-	fmt.Printf("%s %s\n", colorize(ColorGreen+ColorBold, "✓"), msg)
+	fmt.Printf("%s %s\n", colorize(ColorBold, "[✓]"), colorize(ColorBold, msg))
 }
 
 func printError(msg string) {
-	fmt.Printf("%s %s\n", colorize(ColorRed+ColorBold, "[!]"), msg)
+	fmt.Printf("%s %s\n", colorize(ColorBold, "[✗]"), colorize(ColorBold, msg))
 }
 
 func printWarning(msg string) {
-	fmt.Printf("%s %s\n", colorize(ColorYellow+ColorBold, "[!]"), msg)
+	fmt.Printf("%s %s\n", colorize(ColorBold, "[!]"), colorize(ColorBold, msg))
 }
 
 func printInfo(msg string) {
-	fmt.Printf("%s %s\n", colorize(ColorBlue+ColorBold, "[*]"), msg)
+	fmt.Printf("%s %s\n", colorize(ColorBold, "[*]"), colorize(ColorBold, msg))
 }
 
 func printHeader(msg string) {
-	fmt.Printf("%s %s\n", colorize(ColorBold+ColorCyan, "[*]"), colorize(ColorBold, msg))
+	fmt.Printf("%s %s\n", colorize(ColorBold, "[*]"), colorize(ColorBold, msg))
 }
 
 func printStep(msg string) {
-	fmt.Printf("%s %s\n", colorize(ColorCyan+ColorBold, "[*]"), msg)
+	fmt.Printf("%s %s\n", colorize(ColorBold, "[*]"), colorize(ColorBold, msg))
 }
 
 // Configuration structure
@@ -545,7 +544,7 @@ func extractCommonName(cert *x509.Certificate) string {
 
 func summarizeChain(certPEM string) string {
 	chunks := splitPEMChain(certPEM)
-	lines := []string{"[*] Certificate chain summary:"}
+	lines := []string{fmt.Sprintf("%s %s", colorize(ColorBold, "[*]"), colorize(ColorBold, "Certificate chain summary:"))}
 	
 	for idx, chunk := range chunks {
 		cert, err := parseCertificate(chunk)
@@ -847,11 +846,7 @@ func uploadMissingIntermediateCAIfNeeded(api *FortiAPI, certPEM string) (*map[st
 		if state == "updated" {
 			method = "cmdb_put"
 		}
-		action := "Created"
-		if state == "updated" {
-			action = "Updated"
-		}
-		fmt.Printf("[*] Result: %s intermediate CA \"%s\" in %s store (via %s, HTTP %d)\n", action, sanitizedName, getStore(api.config), method, httpCode)
+		// Don't print here - let the main function handle the display
 		return &map[string]interface{}{
 			"name":        sanitizedName,
 			"state":       state,
@@ -1070,7 +1065,7 @@ func (ops *CertificateOperations) rebindSSLInspectionProfiles(newCertName, uploa
 	}
 	
 	if len(profileMappings) == 0 {
-		fmt.Printf("[*] No SSL inspection profiles found\n")
+		printInfo("No SSL inspection profiles found")
 		return result, nil
 	}
 	
@@ -1089,13 +1084,13 @@ func (ops *CertificateOperations) rebindSSLInspectionProfiles(newCertName, uploa
 		if certDomain != "" && ops.domainsMatch(uploadDomain, certDomain) {
 			oldSSLCerts = append(oldSSLCerts, certName)
 			profilesToRebind = append(profilesToRebind, profiles...)
-			fmt.Printf("[*] Found SSL inspection certificate: %s used in %d profile(s): %s\n",
-				certName, len(profiles), strings.Join(profiles, ", "))
+			printInfo(fmt.Sprintf("Found SSL inspection certificate: %s used in %d profile(s): %s",
+				certName, len(profiles), strings.Join(profiles, ", ")))
 		}
 	}
 	
 	if len(profilesToRebind) == 0 {
-		fmt.Printf("[*] No SSL inspection profiles found for domain %s\n", uploadDomain)
+		printInfo(fmt.Sprintf("No SSL inspection profiles found for domain %s", uploadDomain))
 		return result, nil
 	}
 	
@@ -1110,8 +1105,8 @@ func (ops *CertificateOperations) rebindSSLInspectionProfiles(newCertName, uploa
 	}
 	profilesToRebind = uniqueProfilesList
 	
-	fmt.Printf("[*] Found %d SSL inspection profile(s) to rebind: %s\n",
-		len(profilesToRebind), strings.Join(profilesToRebind, ", "))
+	printInfo(fmt.Sprintf("Found %d SSL inspection profile(s) to rebind: %s",
+		len(profilesToRebind), strings.Join(profilesToRebind, ", ")))
 	
 	// Rebind each profile from old certificate to new certificate
 	for _, oldCert := range oldSSLCerts {
@@ -1126,12 +1121,12 @@ func (ops *CertificateOperations) rebindSSLInspectionProfiles(newCertName, uploa
 			
 			if success {
 				result.ProfilesRebound = append(result.ProfilesRebound, profileInfo)
-				fmt.Printf("[*] Rebound SSL inspection profile '%s' from '%s' to '%s'\n",
-					profileName, oldCert, newCertName)
+				printSuccess(fmt.Sprintf("Rebound SSL inspection profile '%s' from '%s' to '%s'",
+					profileName, oldCert, newCertName))
 			} else {
 				profileInfo["detail"] = detail
 				result.ProfilesFailed = append(result.ProfilesFailed, profileInfo)
-				fmt.Printf("[!] Failed to rebind SSL inspection profile '%s': %v\n", profileName, detail)
+				printWarning(fmt.Sprintf("Failed to rebind SSL inspection profile '%s': %v", profileName, detail))
 			}
 		}
 	}
@@ -1270,7 +1265,7 @@ func (ops *CertificateOperations) pruneSSLInspectionCertificates(currentName, do
 	// Extract expiry date from current certificate name
 	currentExpiry := ops.extractExpiryFromName(currentName)
 	if currentExpiry == "" {
-		fmt.Printf("[!] Could not extract expiry date from current certificate name: %s\n", currentName)
+		printWarning(fmt.Sprintf("Could not extract expiry date from current certificate name: %s", currentName))
 		return result
 	}
 
@@ -1302,10 +1297,10 @@ func (ops *CertificateOperations) pruneSSLInspectionCertificates(currentName, do
 
 		// Only delete certificates with older expiry dates
 		if certExpiry < currentExpiry {
-			fmt.Printf("[*] Pruning old SSL inspection certificate: %s (expires %s, current expires %s)\n", certName, certExpiry, currentExpiry)
+			printInfo(fmt.Sprintf("Pruning old SSL inspection certificate: %s (expires %s, current expires %s)", certName, certExpiry, currentExpiry))
 
 			if ops.config.DryRun {
-				fmt.Printf("[*] DRYRUN: would delete old SSL inspection certificate: %s\n", certName)
+				printInfo(fmt.Sprintf("DRYRUN: would delete old SSL inspection certificate: %s", certName))
 				result["deleted"] = append(result["deleted"].([]string), certName)
 				continue
 			}
@@ -1313,7 +1308,7 @@ func (ops *CertificateOperations) pruneSSLInspectionCertificates(currentName, do
 			success, detail := ops.deleteCert(certName)
 			if success {
 				result["deleted"] = append(result["deleted"].([]string), certName)
-				fmt.Printf("[*] Pruned old SSL inspection certificate: %s\n", certName)
+				printInfo(fmt.Sprintf("Pruned old SSL inspection certificate: %s", certName))
 			} else {
 				httpStatus := "unknown"
 				if detailMap, ok := detail.(map[string]interface{}); ok {
@@ -1327,7 +1322,7 @@ func (ops *CertificateOperations) pruneSSLInspectionCertificates(currentName, do
 					"reason": reason,
 				}
 				result["skipped"] = append(result["skipped"].([]map[string]interface{}), skipped)
-				fmt.Printf("[!] Failed to prune SSL inspection certificate %s: %s\n", certName, reason)
+				printWarning(fmt.Sprintf("Failed to prune SSL inspection certificate %s: %s", certName, reason))
 			}
 		}
 	}
@@ -1351,7 +1346,7 @@ func (ops *CertificateOperations) pruneOldCertificates(currentName string) map[s
 	currentExpiry := ops.extractExpiryFromName(currentName)
 
 	if currentExpiry == "" {
-		fmt.Printf("[!] Could not extract expiry date from current certificate name: %s\n", currentName)
+		printWarning(fmt.Sprintf("Could not extract expiry date from current certificate name: %s", currentName))
 		return result
 	}
 
@@ -1410,15 +1405,15 @@ func (ops *CertificateOperations) pruneOldCertificates(currentName string) map[s
 				"reason": fmt.Sprintf("bound to services: %s", strings.Join(boundServices, ", ")),
 			}
 			result["skipped"] = append(result["skipped"].([]map[string]interface{}), skipped)
-			fmt.Printf("[*] Skipping certificate %s - bound to services: %s\n", certName, strings.Join(boundServices, ", "))
+			printInfo(fmt.Sprintf("Skipping certificate %s - bound to services: %s", certName, strings.Join(boundServices, ", ")))
 			continue
 		}
 
 		// Safe to delete: same base domain, older expiry, no service bindings
-		fmt.Printf("[*] Pruning old certificate: %s (expires %s, current expires %s, no service bindings)\n", certName, certExpiry, currentExpiry)
+		printInfo(fmt.Sprintf("Pruning old certificate: %s (expires %s, current expires %s, no service bindings)", certName, certExpiry, currentExpiry))
 
 		if ops.config.DryRun {
-			fmt.Printf("[*] DRYRUN: would delete old certificate: %s\n", certName)
+			printInfo(fmt.Sprintf("DRYRUN: would delete old certificate: %s", certName))
 			result["deleted"] = append(result["deleted"].([]string), certName)
 			continue
 		}
@@ -1426,7 +1421,7 @@ func (ops *CertificateOperations) pruneOldCertificates(currentName string) map[s
 		success, detail := ops.deleteCert(certName)
 		if success {
 			result["deleted"] = append(result["deleted"].([]string), certName)
-			fmt.Printf("[*] Pruned old certificate: %s\n", certName)
+			printInfo(fmt.Sprintf("Pruned old certificate: %s", certName))
 		} else {
 			httpStatus := "unknown"
 			if detailMap, ok := detail.(map[string]interface{}); ok {
@@ -1440,7 +1435,7 @@ func (ops *CertificateOperations) pruneOldCertificates(currentName string) map[s
 				"reason": reason,
 			}
 			result["skipped"] = append(result["skipped"].([]map[string]interface{}), skipped)
-			fmt.Printf("[!] Failed to prune certificate %s: %s\n", certName, reason)
+			printWarning(fmt.Sprintf("Failed to prune certificate %s: %s", certName, reason))
 		}
 	}
 
@@ -1929,7 +1924,7 @@ func main() {
 	}
 	
 	// Display certificate chain summary
-	fmt.Println(summarizeChain(certPEM))
+	fmt.Print(summarizeChain(certPEM) + "\n")
 	
 	// Determine certificate name
 	certName, err := plannedCertName(certPEM, config.Name)
@@ -1948,7 +1943,7 @@ func main() {
 	}
 	
 	// Print effective configuration (matching Python)
-	fmt.Println("[*] Effective configuration:")
+	printInfo("Effective configuration:")
 	fmt.Printf("    host: %s\n", config.Host)
 	fmt.Printf("    port: %d\n", config.Port)
 	fmt.Printf("    vdom: %s\n", func() string {
@@ -1968,23 +1963,23 @@ func main() {
 	}
 	
 	// Print planned certificate name (matching Python exactly)
-	fmt.Printf("[*] Planned certificate name: %s\n", certName)
+	printInfo(fmt.Sprintf("Planned certificate name: %s", certName))
 	
 	// Print planned intermediate CA info (matching Python)
 	if config.AutoIntermediateCA {
 		issuingCA := extractImmediateIssuingCA(certPEM)
 		if issuingCA != nil {
 			sanitizedCAName := sanitizeCACertificateName(issuingCA.CommonName)
-			fmt.Printf("[*] Planned intermediate CA: %s (CN: %s)\n", sanitizedCAName, issuingCA.CommonName)
+			printInfo(fmt.Sprintf("Planned intermediate CA: %s (CN: %s)", sanitizedCAName, issuingCA.CommonName))
 		} else {
-			fmt.Printf("[*] No intermediate CA found in certificate chain\n")
+			printInfo("No intermediate CA found in certificate chain")
 		}
 	} else {
-		fmt.Printf("[*] Automatic intermediate CA upload: disabled\n")
+		printInfo("Automatic intermediate CA upload: disabled")
 	}
 	
 	// Print target store (matching Python)
-	fmt.Printf("[*] Target store: %s\n", getStore(config))
+	printInfo(fmt.Sprintf("Target store: %s", getStore(config)))
 	
 	// Initialize API client and certificate operations
 	api := NewFortiAPI(config)
@@ -2024,7 +2019,7 @@ func main() {
 				} else {
 					sourceDisplay = "unknown source"
 				}
-				fmt.Printf("[*] Intermediate CA already exists: %s (%s)\n", caName, sourceDisplay)
+				printInfo(fmt.Sprintf("Intermediate CA already exists: %s (%s)", caName, sourceDisplay))
 			} else if caState == "dry_run" {
 				fmt.Printf("DRY RUN: would upload intermediate CA: %s\n", caName)
 			} else if caState == "created" || caState == "updated" {
@@ -2050,8 +2045,8 @@ func main() {
 					action = "Updated"
 				}
 				
-				fmt.Printf("[*] Result: %s intermediate CA \"%s\" in %s store (via %s, HTTP %s)\n",
-					action, caName, getStore(config), methodDisplay, httpDisplay)
+				printSuccess(fmt.Sprintf("%s intermediate CA \"%s\" in %s store (via %s, HTTP %s)",
+					action, caName, getStore(config), methodDisplay, httpDisplay))
 			}
 			
 			result.IntermediateCA = fmt.Sprintf("Processed: %s", caName)
@@ -2108,12 +2103,12 @@ func main() {
 		if state == "updated" {
 			action = "Updated"
 		}
-		printSuccess(fmt.Sprintf("%s certificate \"%s\" in %s store (via %s, HTTP %d)", action, colorize(ColorBold, certName), colorize(ColorBold, getStore(config)), method, httpCode))
+		printSuccess(fmt.Sprintf("%s certificate \"%s\" in %s store (via %s, HTTP %d)", action, certName, getStore(config), method, httpCode))
 	}
 	
 	// Handle different operation modes
 	if config.CertOnly {
-		fmt.Printf("[*] Certificate-only mode: %s\n", certName)
+		printInfo(fmt.Sprintf("Certificate-only mode: %s", certName))
 		printInfo("Certificate-only mode: skipping service binding")
 		
 		// Certificate-only mode pruning (if enabled)
@@ -2141,10 +2136,10 @@ func main() {
 			skippedCount := len(result.Pruned.Skipped)
 			
 			if deletedCount > 0 {
-				fmt.Printf("[*] Pruned %d old certificate(s): %s\n", deletedCount, strings.Join(result.Pruned.Deleted, ", "))
+				printInfo(fmt.Sprintf("Pruned %d old certificate(s): %s", deletedCount, strings.Join(result.Pruned.Deleted, ", ")))
 			}
 			if skippedCount > 0 {
-				fmt.Printf("[!] Skipped %d certificate(s) during pruning\n", skippedCount)
+				printWarning(fmt.Sprintf("Skipped %d certificate(s) during pruning", skippedCount))
 				// Show detailed skip reasons in debug mode (matching Python lines 1933-1943)
 				if config.LogLevel == "debug" {
 					skipReasons := make(map[string]int)
@@ -2157,12 +2152,12 @@ func main() {
 					for reason, count := range skipReasons {
 						reasonSummary = append(reasonSummary, fmt.Sprintf("%d %s", count, reason))
 					}
-					fmt.Printf("[DEBUG] Skipped %d certificates: %s\n", skippedCount, strings.Join(reasonSummary, ", "))
+					fmt.Printf("%s %s\n", colorize(ColorBold, "[DEBUG]"), colorize(ColorBold, fmt.Sprintf("Skipped %d certificates: %s", skippedCount, strings.Join(reasonSummary, ", "))))
 				}
 			}
 		}
 	} else if config.SSLInspectionCert {
-		fmt.Printf("[*] SSL inspection certificate mode: %s\n", certName)
+		printInfo(fmt.Sprintf("SSL inspection certificate mode: %s", certName))
 		printStep("SSL inspection certificate mode: rebinding profiles")
 		
 		// Extract domain from certificate for SSL inspection matching
@@ -2256,10 +2251,10 @@ func main() {
 			skippedCount := len(result.Pruned.Skipped)
 			
 			if deletedCount > 0 {
-				fmt.Printf("[*] Pruned %d old certificate(s): %s\n", deletedCount, strings.Join(result.Pruned.Deleted, ", "))
+				printInfo(fmt.Sprintf("Pruned %d old certificate(s): %s", deletedCount, strings.Join(result.Pruned.Deleted, ", ")))
 			}
 			if skippedCount > 0 {
-				fmt.Printf("[!] Skipped %d certificate(s) during pruning\n", skippedCount)
+				printWarning(fmt.Sprintf("Skipped %d certificate(s) during pruning", skippedCount))
 				// Show detailed skip reasons in debug mode (matching Python lines 1933-1943)
 				if config.LogLevel == "debug" {
 					skipReasons := make(map[string]int)
@@ -2272,7 +2267,7 @@ func main() {
 					for reason, count := range skipReasons {
 						reasonSummary = append(reasonSummary, fmt.Sprintf("%d %s", count, reason))
 					}
-					fmt.Printf("[DEBUG] Skipped %d certificates: %s\n", skippedCount, strings.Join(reasonSummary, ", "))
+					fmt.Printf("%s %s\n", colorize(ColorBold, "[DEBUG]"), colorize(ColorBold, fmt.Sprintf("Skipped %d certificates: %s", skippedCount, strings.Join(reasonSummary, ", "))))
 				}
 			}
 		}
@@ -2311,9 +2306,9 @@ func main() {
 			}
 			
 			if success {
-				printSuccess(fmt.Sprintf("Successfully bound certificate to %s", colorize(ColorBold, service)))
+				printSuccess(fmt.Sprintf("Successfully bound certificate to %s", service))
 			} else {
-				printError(fmt.Sprintf("Failed to bind certificate to %s", colorize(ColorBold, service)))
+				printError(fmt.Sprintf("Failed to bind certificate to %s", service))
 			}
 		}
 		
@@ -2379,10 +2374,10 @@ func main() {
 				skippedCount := len(result.Pruned.Skipped)
 				
 				if deletedCount > 0 {
-					fmt.Printf("[*] Pruned %d old certificate(s): %s\n", deletedCount, strings.Join(result.Pruned.Deleted, ", "))
+					printInfo(fmt.Sprintf("Pruned %d old certificate(s): %s", deletedCount, strings.Join(result.Pruned.Deleted, ", ")))
 				}
 				if skippedCount > 0 {
-					fmt.Printf("[!] Skipped %d certificate(s) during pruning\n", skippedCount)
+					printWarning(fmt.Sprintf("Skipped %d certificate(s) during pruning", skippedCount))
 					// Show detailed skip reasons in debug mode (matching Python lines 1933-1943)
 					if config.LogLevel == "debug" {
 						skipReasons := make(map[string]int)
@@ -2395,7 +2390,7 @@ func main() {
 						for reason, count := range skipReasons {
 							reasonSummary = append(reasonSummary, fmt.Sprintf("%d %s", count, reason))
 						}
-						fmt.Printf("[DEBUG] Skipped %d certificates: %s\n", skippedCount, strings.Join(reasonSummary, ", "))
+						fmt.Printf("%s %s\n", colorize(ColorBold, "[DEBUG]"), colorize(ColorBold, fmt.Sprintf("Skipped %d certificates: %s", skippedCount, strings.Join(reasonSummary, ", "))))
 					}
 				}
 			} else {
