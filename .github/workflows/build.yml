@@ -69,16 +69,16 @@ jobs:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
-        path: dist/
-        pattern: '*'
-        merge-multiple: true
+        path: artifacts/
 
     - name: Prepare release assets
       run: |
         mkdir -p release-assets
-        find dist/ -type f -executable -o -name "*.exe" | while read file; do
-          cp "$file" release-assets/
-        done
+        # Copy all files from artifact directories
+        find artifacts/ -type f \( -name "fortigate-cert-swap-*" \) -exec cp {} release-assets/ \;
+        # Make sure all files are executable (except .exe)
+        chmod +x release-assets/fortigate-cert-swap-* 2>/dev/null || true
+        echo "Release assets prepared:"
         ls -la release-assets/
 
     - name: Create Release
