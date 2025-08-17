@@ -1,44 +1,64 @@
 # FortiGate Certificate Swap - Production Deployment Guide
 
-This guide provides comprehensive instructions for deploying the **revolutionary v1.11.0** FortiGate certificate swap script with **automatic intermediate CA management** - the world's first solution to FortiGate's certificate chain design limitation.
+**Complete deployment guide for the high-performance Go binary with revolutionary automatic intermediate CA management.**
 
 ## 📋 Quick Start
 
-### 1. **Choose Your Version**
-- [`forti_cert_swap.py`](forti_cert_swap.py) - Production-ready with enhanced error handling, validation, and maintainability
+### 1. **Installation**
 
-### 2. **Install Dependencies**
+#### **Pre-built Binaries (Recommended)**
 ```bash
-# Debian/Ubuntu
-sudo apt-get update
-sudo apt-get install -y python3-cryptography python3-requests python3-yaml
+# Linux x64
+wget https://github.com/CyB0rgg/fortigate-cert-swap/releases/latest/download/fortigate-cert-swap-linux-amd64
+chmod +x fortigate-cert-swap-linux-amd64
+sudo mv fortigate-cert-swap-linux-amd64 /usr/local/bin/fortigate-cert-swap
 
-# Or via pip
-pip3 install cryptography requests pyyaml
+# Linux ARM64
+wget https://github.com/CyB0rgg/fortigate-cert-swap/releases/latest/download/fortigate-cert-swap-linux-arm64
+chmod +x fortigate-cert-swap-linux-arm64
+sudo mv fortigate-cert-swap-linux-arm64 /usr/local/bin/fortigate-cert-swap
+
+# macOS ARM64 (M1/M2/M3/M4)
+wget https://github.com/CyB0rgg/fortigate-cert-swap/releases/latest/download/fortigate-cert-swap-darwin-arm64
+chmod +x fortigate-cert-swap-darwin-arm64
+sudo mv fortigate-cert-swap-darwin-arm64 /usr/local/bin/fortigate-cert-swap
+
+# macOS Intel
+wget https://github.com/CyB0rgg/fortigate-cert-swap/releases/latest/download/fortigate-cert-swap-darwin-amd64
+chmod +x fortigate-cert-swap-darwin-amd64
+sudo mv fortigate-cert-swap-darwin-amd64 /usr/local/bin/fortigate-cert-swap
+
+# Windows x64
+# Download fortigate-cert-swap-windows-amd64.exe from releases
+# Place in PATH or use full path
 ```
 
-### 3. **Basic Usage**
+#### **Build from Source**
+```bash
+git clone https://github.com/CyB0rgg/fortigate-cert-swap.git
+cd fortigate-cert-swap
+go build -ldflags="-s -w" -o fortigate-cert-swap main.go
+```
+
+### 2. **Basic Usage**
 ```bash
 # Check version
-python3 forti_cert_swap.py --version
+fortigate-cert-swap --version
 
 # Standard mode - GUI/SSL-VPN/FTM binding with automatic intermediate CA management
-python3 forti_cert_swap.py -C fortigate.yaml --cert /path/to/cert.pem --key /path/to/key.pem
+fortigate-cert-swap --config fortigate.yaml --cert /path/to/cert.pem --key /path/to/key.pem
 
 # Certificate-only mode - SSL inspection with automatic intermediate CA management
-python3 forti_cert_swap.py --cert-only --cert /path/to/cert.pem --key /path/to/key.pem -C fortigate.yaml
+fortigate-cert-swap --cert-only --cert /path/to/cert.pem --key /path/to/key.pem --config fortigate.yaml
 
 # SSL inspection certificate mode - automated rebinding with automatic intermediate CA management
-python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem --key /path/to/key.pem -C ssl-inspection-certificate.yaml
-
-# Disable automatic intermediate CA management (if needed)
-python3 forti_cert_swap.py --cert /path/to/cert.pem --key /path/to/key.pem --no-auto-intermediate-ca -C fortigate.yaml
+fortigate-cert-swap --ssl-inspection-cert --cert /path/to/cert.pem --key /path/to/key.pem --config fortigate.yaml
 
 # Rebind GUI/SSL-VPN/FTM services only
-python3 forti_cert_swap.py --rebind existing-cert-name -C fortigate.yaml
+fortigate-cert-swap --rebind gui,sslvpn,ftm --config fortigate.yaml
 ```
 
-## 🔗 **REVOLUTIONARY: Automatic Intermediate CA Management (v1.11.0)**
+## 🔗 **Revolutionary: Automatic Intermediate CA Management**
 
 ### 🚀 **World's First FortiGate Certificate Chain Solution**
 
@@ -64,7 +84,7 @@ python3 forti_cert_swap.py --rebind existing-cert-name -C fortigate.yaml
 #### **Default Behavior (Enabled by Default)**
 ```bash
 # Automatic intermediate CA management is enabled by default
-python3 forti_cert_swap.py --cert fullchain.pem --key private.key -C fortigate.yaml
+fortigate-cert-swap --cert fullchain.pem --key private.key --config fortigate.yaml
 
 # Console output shows intermediate CA operations:
 # [*] Certificate chain analysis: Found 1 intermediate CA to process
@@ -81,15 +101,6 @@ python3 forti_cert_swap.py --cert fullchain.pem --key private.key -C fortigate.y
 # [*] Skipping intermediate CA upload - certificate already present
 ```
 
-#### **Manual Control Options**
-```bash
-# Disable automatic intermediate CA management
-python3 forti_cert_swap.py --cert fullchain.pem --key private.key --no-auto-intermediate-ca -C fortigate.yaml
-
-# Enable automatic intermediate CA management (explicit)
-python3 forti_cert_swap.py --cert fullchain.pem --key private.key --auto-intermediate-ca -C fortigate.yaml
-```
-
 #### **Configuration File Control**
 ```yaml
 # Enable automatic intermediate CA management (default)
@@ -101,13 +112,13 @@ auto_intermediate_ca: false
 
 ### 🎯 **Production Benefits**
 
-#### **Before v1.11.0**
+#### **Before This Tool**
 - ❌ Manual intermediate CA uploads required
 - ❌ Incomplete certificate chains in SSL inspection
 - ❌ SSL Labs warnings about missing certificates
 - ❌ curl validation required `--insecure` flag
 
-#### **After v1.11.0**
+#### **After This Tool**
 - ✅ Automatic intermediate CA management
 - ✅ Complete certificate chains automatically
 - ✅ SSL Labs validation passes without warnings
@@ -116,7 +127,7 @@ auto_intermediate_ca: false
 ### 🔍 **Technical Implementation**
 
 #### **Certificate Chain Processing**
-- **Chain Parsing**: Extracts and validates complete certificate chains using cryptography library
+- **Chain Parsing**: Extracts and validates complete certificate chains using Go crypto libraries
 - **Immediate Issuer Extraction**: Identifies direct issuing CAs (not root CAs)
 - **Content Comparison**: Binary certificate comparison to prevent duplicates
 - **Sanitized Naming**: Generates clean CA certificate names from Common Name
@@ -136,7 +147,7 @@ Perfect for SSL inspection scenarios where you need to upload certificates witho
 
 ```bash
 # Simple certificate upload for SSL inspection
-python3 forti_cert_swap.py --cert-only --cert /path/to/cert.pem --key /path/to/key.pem -C fortigate.yaml
+fortigate-cert-swap --cert-only --cert /path/to/cert.pem --key /path/to/key.pem --config fortigate.yaml
 ```
 
 **Use Cases**:
@@ -149,10 +160,10 @@ Complete automated SSL inspection certificate renewal workflow:
 
 ```bash
 # Automated SSL inspection certificate renewal
-python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem --key /path/to/key.pem --host fortigate.kiroshi.group --port 8443 --token TOKEN --insecure
+fortigate-cert-swap --ssl-inspection-cert --cert /path/to/cert.pem --key /path/to/key.pem --host fortigate.example.com --port 443 --token TOKEN --insecure
 
 # With pruning of old certificates
-python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem --key /path/to/key.pem --prune -C ssl-inspection-certificate.yaml
+fortigate-cert-swap --ssl-inspection-cert --cert /path/to/cert.pem --key /path/to/key.pem --prune --config fortigate.yaml
 ```
 
 **Features**:
@@ -174,10 +185,10 @@ python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/cert.pem
 **Example**:
 ```bash
 # INCORRECT - will fail with duplicate content
-python3 forti_cert_swap.py --ssl-inspection-certificate --cert cert.pem --key key.pem --name old-cert-name
+fortigate-cert-swap --ssl-inspection-cert --cert cert.pem --key key.pem --name old-cert-name
 
 # CORRECT - auto-generates name from certificate expiry
-python3 forti_cert_swap.py --ssl-inspection-certificate --cert cert.pem --key key.pem
+fortigate-cert-swap --ssl-inspection-cert --cert cert.pem --key key.pem
 ```
 
 ### 🔗 **Automatic Intermediate CA Integration**
@@ -186,10 +197,10 @@ All SSL inspection certificate modes now include automatic intermediate CA manag
 
 ```bash
 # Certificate-only mode with automatic intermediate CA management
-python3 forti_cert_swap.py --cert-only --cert /path/to/fullchain.pem --key /path/to/key.pem -C fortigate.yaml
+fortigate-cert-swap --cert-only --cert /path/to/fullchain.pem --key /path/to/key.pem --config fortigate.yaml
 
 # SSL inspection certificate mode with automatic intermediate CA management
-python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/fullchain.pem --key /path/to/key.pem --prune -C ssl-inspection-certificate.yaml
+fortigate-cert-swap --ssl-inspection-cert --cert /path/to/fullchain.pem --key /path/to/key.pem --prune --config fortigate.yaml
 
 # Console output shows both certificate and intermediate CA operations:
 # [*] Certificate chain analysis: Found 1 intermediate CA to process
@@ -200,10 +211,16 @@ python3 forti_cert_swap.py --ssl-inspection-certificate --cert /path/to/fullchai
 # [*] Complete certificate chain validation: curl test successful without --insecure
 ```
 
-## 🚀 Production Enhancements
+## 🚀 Performance & Features
+
+### Ultra-Fast Performance
+- **0.026s startup time** - 13.4x faster than Python original
+- **6.5MB binary size** - Single native binary
+- **30-second builds** - Fast Go compilation
+- **Zero dependencies** - No runtime requirements
 
 ### Enhanced Logging
-The current version includes comprehensive logging with operation correlation:
+Comprehensive logging with operation correlation:
 
 ```
 2025-08-14 06:05:19 UTC INFO     [26e2d92c] Starting upload operation for certificate 'kiroshi.group-20251029' on forti.kiroshi.group
@@ -219,98 +236,228 @@ The current version includes comprehensive logging with operation correlation:
 
 ## 🔧 Configuration Management
 
+### 🔑 FortiGate API Setup
+
+**IMPORTANT**: Before deployment, you must create a FortiGate REST API user and token.
+
+#### **Required API Permissions**
+
+The FortiGate Certificate Swap tool requires access to the following API endpoints:
+
+**Certificate Management (Required)**
+- `vpn.certificate/local` - Upload, update, and manage local certificates
+- `vpn.certificate/ca` - Upload and manage CA certificates (for intermediate CA management)
+
+**Service Binding (Required for Standard Mode)**
+- `system/global` - Bind certificates to GUI admin interface
+- `vpn.ssl/settings` - Bind certificates to SSL-VPN
+- `system/ftm-push` - Bind certificates to FTM push notifications
+
+**SSL Inspection (Required for SSL Inspection Mode)**
+- `firewall/ssl-ssh-profile` - Manage SSL inspection profiles and certificate bindings
+
+**Minimum Required Privileges Summary:**
+- **Certificate Management**: Read/Write access to certificate stores
+- **System Configuration**: Read/Write access for service bindings
+- **SSL/SSH Inspection**: Read/Write access (only if using `--ssl-inspection-cert`)
+- **VPN SSL-VPN**: Read/Write access (for SSL-VPN certificate binding)
+
+#### **Step-by-Step API User Creation**
+
+**Step 1: Create REST API Admin User**
+1. Login to FortiGate GUI as an administrator
+2. Navigate to: `System` → `Administrators`
+3. Click: `Create New` → `REST API Admin`
+
+**Step 2: Configure Basic Settings**
+```
+Administrator Name: cert-swap-api
+Comments: API user for certificate management automation
+```
+
+**Step 3: Configure Admin Profile**
+
+**Option A: Use Built-in Profile (Recommended for Testing)**
+- Admin Profile: `prof_admin` (Full access - simplest setup)
+- Note: This provides full administrative access
+
+**Option B: Create Custom Profile (Production Best Practice)**
+1. Navigate to: `System` → `Admin Profiles`
+2. Click: `Create New`
+3. Configure the custom profile:
+
+```
+Name: cert-management-api
+Comments: Minimal permissions for certificate management
+
+System Configuration:
+├── Certificate Management: Read/Write (REQUIRED)
+├── Administrator: None
+├── Maintenance: None
+└── All others: None
+
+Security Profiles:
+├── SSL/SSH Inspection: Read/Write (REQUIRED for --ssl-inspection-cert mode)
+└── All others: None
+
+VPN:
+├── SSL-VPN: Read/Write (REQUIRED for SSL-VPN certificate binding)
+├── Certificate: Read/Write (REQUIRED)
+└── All others: None
+
+System:
+├── Config: Read/Write (REQUIRED for GUI admin certificate binding)
+└── All others: None
+
+Network:
+├── Interface: None
+├── Routing: None
+└── All others: None
+
+Policy & Objects:
+├── All: None (SSL inspection profiles are under Security Profiles)
+
+Log & Report:
+├── All: None
+```
+
+**Step 4: Generate API Token**
+1. Set Admin Profile: Select `prof_admin` or your custom profile
+2. Trusted Hosts: Configure allowed source IPs (recommended for security)
+   ```
+   # Examples:
+   192.168.1.100/32    # Single host
+   192.168.1.0/24      # Subnet
+   0.0.0.0/0           # Any host (less secure)
+   ```
+3. Click: `OK`
+
+**Step 5: Copy API Token**
+⚠️ **IMPORTANT**: The API token is displayed only once. Copy it immediately:
+```
+Example token: qtm6p3mHQ1fX7b9cK8vQ2jF9sG4nR7wL
+```
+
+#### **Testing API Access**
+
+**Test with curl:**
+```bash
+# Test basic connectivity
+curl -k -H "Authorization: Bearer YOUR_TOKEN" \
+  "https://your-fortigate:8443/api/v2/cmdb/system/global?scope=global"
+
+# Test certificate access
+curl -k -H "Authorization: Bearer YOUR_TOKEN" \
+  "https://your-fortigate:8443/api/v2/cmdb/vpn.certificate/local?scope=global"
+```
+
+**Test with the tool:**
+```bash
+# Test with dry-run mode
+fortigate-cert-swap --host your-fortigate --port 443 --token YOUR_TOKEN --dry-run --cert test.pem --key test.key
+
+# Expected output:
+# [*] DRY RUN: would POST vpn.certificate/local name=test-cert store=GLOBAL
+# [*] DRY RUN: would PUT system/global
+# [*] DRY RUN: would PUT vpn.ssl/settings
+# [*] DRY RUN: would PUT system/ftm-push
+```
+
+#### **VDOM Configuration**
+
+For VDOM deployments, ensure the API user has access to the target VDOM:
+
+1. **Admin Profile Configuration:**
+   ```
+   Virtual Domain: Enable
+   Virtual Domain Assignment: Specify target VDOMs
+   ```
+
+2. **Tool Configuration:**
+   ```yaml
+   # fortigate.yaml
+   host: your-fortigate
+   port: 443
+   token: "YOUR_TOKEN"
+   vdom: "global"  # Specify target VDOM
+   ```
+
 ### Environment Variables
 Set these environment variables for production deployment:
 
 ```bash
 # Required
 export FORTI_CERT_HOST=your-fortigate.example.com
-export FORTI_CERT_PORT=8443
-export FORTI_CERT_TOKEN=your-api-token
+export FORTI_CERT_PORT=443
+export FORTI_CERT_TOKEN=your-api-token  # Created using steps above
 
 # Optional
-export FORTI_CERT_VDOM=root                    # For VDOM deployments
+export FORTI_CERT_VDOM=global                  # For VDOM deployments
 export FORTI_CERT_INSECURE=false               # Set to true only if needed
 export FORTI_CERT_DRY_RUN=false                # Set to true for testing
 export FORTI_CERT_PRUNE=true                   # Auto-cleanup old certificates
-export FORTI_CERT_AUTO_INTERMEDIATE_CA=true    # Automatic intermediate CA management (NEW in v1.11.0)
-export FORTI_CERT_TIMEOUT_CONNECT=10           # Connection timeout
-export FORTI_CERT_TIMEOUT_READ=60              # Read timeout
+export FORTI_CERT_AUTO_INTERMEDIATE_CA=true    # Automatic intermediate CA management
+export FORTI_CERT_TIMEOUT_CONNECT=5            # Connection timeout
+export FORTI_CERT_TIMEOUT_READ=30              # Read timeout
 export FORTI_CERT_LOG_LEVEL=standard           # standard or debug
-export FORTI_CERT_LOG_FILE=/var/log/forti_cert_swap.log
+export FORTI_CERT_LOG_FILE=/var/log/fortigate_cert_swap.log
 ```
 
 ### Configuration Validation
-Use the production enhancements to validate your configuration:
+Use the built-in validation to test your configuration:
 
-```python
-# Configuration validation is built into the main script
-python3 forti_cert_swap.py --dry-run -C your-config.yaml --cert test.pem --key test.key
+```bash
+# Configuration validation with dry-run mode
+fortigate-cert-swap --dry-run --config your-config.yaml --cert test.pem --key test.key
 ```
 
 ## 📊 Monitoring & Metrics
 
 ### Built-in Metrics
-The improved version includes comprehensive metrics collection:
+The tool includes comprehensive metrics collection:
 
-```python
+```bash
 # Metrics are logged automatically with operation correlation IDs
 # Check log files for performance and success rate information
-tail -f /var/log/forti_cert_swap.log | grep -E "(INFO|ERROR|WARN)"
+tail -f /var/log/fortigate_cert_swap.log | grep -E "(INFO|ERROR|WARN)"
 ```
 
 ### Log Analysis
-Analyze your existing logs to identify issues:
+Analyze your logs to identify issues:
 
-```python
-# Log analysis can be done with standard tools
-grep -c "ERROR" /var/log/forti_cert_swap.log
-grep -c "INFO.*successful" /var/log/forti_cert_swap.log
+```bash
+# Log analysis with standard tools
+grep -c "ERROR" /var/log/fortigate_cert_swap.log
+grep -c "INFO.*successful" /var/log/fortigate_cert_swap.log
 ```
 
 ## 🧪 Testing
 
-### Unit Tests
-The project includes a comprehensive test suite with 39 unit tests covering all major functionality:
+### Dry-run Testing
+Test operations without making changes:
 
 ```bash
-# Run all tests
-python3 test_forti_cert_swap.py
+# Test with dry-run mode
+fortigate-cert-swap --dry-run --config fortigate.yaml --cert test.pem --key test.key
 
-# Run with verbose output
-python3 test_forti_cert_swap.py -v
-
-# Run specific test class
-python3 -m unittest test_forti_cert_swap.TestCertificateProcessor -v
+# Test specific operations
+fortigate-cert-swap --ssl-inspection-cert --dry-run --cert test.pem --key test.key --config config.yaml
 ```
 
-**Test Coverage:**
-- Configuration validation and merging
-- Certificate processing and validation
-- Enhanced logging with sensitive data scrubbing
-- FortiGate API client functionality
-- Certificate operations (upload, bind, prune)
-- Automatic intermediate CA management (NEW in v1.11.0)
-- Certificate chain processing and validation
-- CA certificate deduplication and naming
-- Error handling and edge cases
-- Integration scenarios
-
 ### Integration Testing
-Use the integration testing framework:
+Use the built-in testing framework:
 
-```python
+```bash
 # Use dry-run mode for integration testing
-python3 forti_cert_swap.py --dry-run -C test-config.yaml --cert test.pem --key test.key
+fortigate-cert-swap --dry-run --config test-config.yaml --cert test.pem --key test.key
 ```
 
 ### Pre-deployment Validation
 Validate your deployment environment:
 
-```python
-# Environment validation is built into the script
-# Run with --dry-run to validate configuration and connectivity
-python3 forti_cert_swap.py --dry-run -C production-config.yaml --cert test.pem --key test.key
+```bash
+# Environment validation with dry-run
+fortigate-cert-swap --dry-run --config production-config.yaml --cert test.pem --key test.key
 ```
 
 ## 🔒 Security Best Practices
@@ -334,7 +481,7 @@ chmod 644 /path/to/certificate.pem
 
 # Secure log files
 chmod 640 /var/log/forti_cert_swap.log
-chown root:adm /var/log/forti_cert_swap.log
+chown root:adm /var/log/fortigate_cert_swap.log
 ```
 
 ### 4. **Network Security**
@@ -344,10 +491,10 @@ chown root:adm /var/log/forti_cert_swap.log
 
 ## 📈 Performance Optimization
 
-### 1. **Connection Pooling**
-The improved version includes connection pooling:
-- Reuses HTTP connections
-- Configurable pool sizes
+### 1. **Connection Configuration**
+The tool includes optimized connection handling:
+- HTTP/2 support with connection reuse
+- Configurable timeouts
 - Automatic retry logic
 
 ### 2. **Timeout Configuration**
@@ -374,12 +521,12 @@ For multiple certificates, consider:
 
 #### 1. **HTTP 500 Errors**
 **Cause**: Certificate already exists or FortiGate internal error
-**Solution**: The script automatically retries with PUT (update) operation
+**Solution**: The tool automatically retries with PUT (update) operation
 
 #### 2. **TLS Verification Failures**
 **Cause**: Incomplete certificate chain on FortiGate
 **Solutions**:
-- **AUTOMATIC (v1.11.0)**: Intermediate CAs are automatically uploaded - this should resolve most chain issues
+- **AUTOMATIC**: Intermediate CAs are automatically uploaded - this should resolve most chain issues
 - Verify `auto_intermediate_ca: true` is enabled in configuration
 - Check logs for intermediate CA upload status
 - Use `--insecure` temporarily only if automatic CA management fails
@@ -404,16 +551,16 @@ For multiple certificates, consider:
 #### Failed Certificate Upload
 ```bash
 # Check current certificates
-python3 forti_cert_swap.py --rebind existing-cert-name --dry-run
+fortigate-cert-swap --rebind gui,sslvpn,ftm --dry-run
 
 # Rollback to previous certificate (GUI/SSL-VPN/FTM only)
-python3 forti_cert_swap.py --rebind previous-cert-name
+fortigate-cert-swap --rebind gui,sslvpn,ftm --config fortigate.yaml
 ```
 
 #### Failed SSL Inspection Certificate Operations
 ```bash
 # Check SSL inspection profiles and certificates
-python3 forti_cert_swap.py --ssl-inspection-certificate --cert current.pem --key current.key --dry-run
+fortigate-cert-swap --ssl-inspection-cert --cert current.pem --key current.key --dry-run
 
 # Manual SSL inspection profile rebinding (if needed)
 # Use FortiGate GUI: Security Profiles > SSL/SSH Inspection > [Profile] > Server Certificate
@@ -422,7 +569,7 @@ python3 forti_cert_swap.py --ssl-inspection-certificate --cert current.pem --key
 #### Failed Service Bindings
 ```bash
 # Rebind GUI/SSL-VPN/FTM services to existing certificate
-python3 forti_cert_swap.py --rebind cert-name-20251108
+fortigate-cert-swap --rebind gui,sslvpn,ftm --config fortigate.yaml
 
 # Check binding status via FortiGate CLI
 # GUI: show system global | grep admin-server-cert
@@ -443,7 +590,7 @@ python3 forti_cert_swap.py --rebind cert-name-20251108
 ## 📋 Deployment Checklist
 
 ### Pre-deployment
-- [ ] Dependencies installed and tested
+- [ ] Binary downloaded and installed
 - [ ] Configuration validated
 - [ ] API token permissions verified (including CA certificate management)
 - [ ] Network connectivity confirmed
@@ -489,14 +636,14 @@ python3 forti_cert_swap.py --rebind cert-name-20251108
 
 ### Cron Job Example
 ```bash
-# /etc/cron.d/forti-cert-swap
+# /etc/cron.d/fortigate-cert-swap
 # Renew certificates daily at 2 AM
-0 2 * * * root /usr/local/bin/forti_cert_swap.py -C /etc/fortigate/config.yaml --cert /etc/ssl/certs/current.pem --key /etc/ssl/private/current.key >> /var/log/forti_cert_swap.log 2>&1
+0 2 * * * root /usr/local/bin/fortigate-cert-swap --config /etc/fortigate/config.yaml --cert /etc/ssl/certs/current.pem --key /etc/ssl/private/current.key >> /var/log/fortigate_cert_swap.log 2>&1
 ```
 
 ### Systemd Service
 ```ini
-# /etc/systemd/system/forti-cert-swap.service
+# /etc/systemd/system/fortigate-cert-swap.service
 [Unit]
 Description=FortiGate Certificate Swap
 After=network.target
@@ -504,7 +651,7 @@ After=network.target
 [Service]
 Type=oneshot
 User=root
-ExecStart=/usr/local/bin/forti_cert_swap.py -C /etc/fortigate/config.yaml --cert /etc/ssl/certs/current.pem --key /etc/ssl/private/current.key
+ExecStart=/usr/local/bin/fortigate-cert-swap --config /etc/fortigate/config.yaml --cert /etc/ssl/certs/current.pem --key /etc/ssl/private/current.key
 StandardOutput=journal
 StandardError=journal
 
@@ -522,11 +669,11 @@ CERT_PATH="/etc/letsencrypt/live/yourdomain.com/fullchain.pem"
 KEY_PATH="/etc/letsencrypt/live/yourdomain.com/privkey.pem"
 
 # Deploy to FortiGate
-/usr/local/bin/forti_cert_swap.py \
-    -C /etc/fortigate/config.yaml \
+/usr/local/bin/fortigate-cert-swap \
+    --config /etc/fortigate/config.yaml \
     --cert "$CERT_PATH" \
     --key "$KEY_PATH" \
-    --log /var/log/forti_cert_swap.log
+    --log /var/log/fortigate_cert_swap.log
 
 # Check exit code
 if [ $? -eq 0 ]; then
@@ -537,13 +684,34 @@ else
 fi
 ```
 
+### Integration with ACME.sh
+```bash
+#!/bin/bash
+# ACME.sh deploy hook
+
+# Set variables from ACME.sh
+CERT_PATH="$1"
+KEY_PATH="$2"
+CA_PATH="$3"
+FULLCHAIN_PATH="$4"
+DOMAIN="$5"
+
+# Deploy to FortiGate using fullchain
+/usr/local/bin/fortigate-cert-swap \
+    --cert "$FULLCHAIN_PATH" \
+    --key "$KEY_PATH" \
+    --host "$FORTI_HOST" \
+    --port "$FORTI_PORT" \
+    --token "$FORTI_TOKEN"
+```
+
 ## 📞 Support & Troubleshooting
 
 ### Debug Mode
 Enable debug logging for troubleshooting:
 ```bash
 export FORTI_CERT_LOG_LEVEL=debug
-python3 forti_cert_swap.py --log-level debug ...
+fortigate-cert-swap --log-level debug ...
 ```
 
 ### Common Log Patterns
@@ -563,7 +731,7 @@ python3 forti_cert_swap.py --log-level debug ...
 - **Duplicate CA warnings**: Normal behavior - system prevents duplicate uploads
 
 ### Getting Help
-1. Check the comprehensive test suite for examples
+1. Check the comprehensive examples for usage patterns
 2. Review log analysis suggestions
 3. Use the deployment validator for environment issues
 4. Enable debug logging for detailed troubleshooting
@@ -574,8 +742,13 @@ python3 forti_cert_swap.py --log-level debug ...
 
 - [FortiGate REST API Documentation](https://docs.fortinet.com/document/fortigate/7.4.0/administration-guide/954635/rest-api-administrator)
 - [Certificate Management Best Practices](https://docs.fortinet.com/document/fortigate/7.4.0/administration-guide/954635/certificate-management)
-- [Python Cryptography Library](https://cryptography.io/en/latest/)
+- [Go Crypto Package Documentation](https://pkg.go.dev/crypto)
 
 ---
 
-*This deployment guide is based on analysis of your production logs and includes specific improvements for your use case.*
+---
+
+**Copyright (c) 2025 CyB0rgg <dev@bluco.re>**
+**Licensed under the MIT License**
+
+*This deployment guide covers the complete production deployment of the high-performance Go binary with revolutionary automatic intermediate CA management.*
