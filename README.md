@@ -97,6 +97,12 @@ log_level: "debug"    # standard | debug
 
 ## 💡 Basic Usage
 
+### Check version:
+
+```bash
+forti_cert_swap.py --version
+```
+
 ### Upload & bind from existing key and certificate chain:
 
 ```bash

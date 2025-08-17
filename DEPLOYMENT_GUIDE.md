@@ -19,6 +19,9 @@ pip3 install cryptography requests pyyaml
 
 ### 3. **Basic Usage**
 ```bash
+# Check version
+python3 forti_cert_swap.py --version
+
 # Standard mode - GUI/SSL-VPN/FTM binding with automatic intermediate CA management
 python3 forti_cert_swap.py -C fortigate.yaml --cert /path/to/cert.pem --key /path/to/key.pem
 

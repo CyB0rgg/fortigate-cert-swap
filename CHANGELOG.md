@@ -1,6 +1,16 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [1.11.1] - 2025-08-17
+
+### Added
+- **Version Flag** (`--version`) - Display version information for the script
+- **Enhanced CLI Interface** - Added standard version flag support for better tooling integration
+
+### Technical Improvements
+- **Argument Parser Enhancement** - Added version action to argument parser with formatted output
+- **Version Display Consistency** - Unified version display across help text and version flag
+
 ## [1.11.0] - 2025-08-16
 
 ### Added

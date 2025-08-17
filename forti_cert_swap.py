@@ -19,7 +19,7 @@
 #  - Operation correlation IDs for debugging
 #  - Sensitive data scrubbing in logs for security
 #
-# Version: 1.11.0
+# Version: 1.11.1
 #
 # MIT License
 # Copyright (c) 2025 CyB0rgg <dev@bluco.re>
@@ -68,7 +68,7 @@ if missing_msgs:
         sys.exit(1)
 
 API_PREFIX = "/api/v2"
-VERSION = "1.11.0"
+VERSION = "1.11.1"
 
 # ---------------------------
 # Configuration & Validation
@@ -1418,6 +1418,9 @@ class FortiCertSwap:
             formatter_class=argparse.RawDescriptionHelpFormatter
         )
         
+        # Version flag
+        parser.add_argument("--version", action="version", version=f"FortiGate Certificate Swap v{VERSION}")
+        
         # Connection settings
         parser.add_argument("--host", help="FortiGate hostname")
         parser.add_argument("--port", type=int, help="HTTPS port (e.g., 443 or 8443)")
@@ -1953,7 +1956,7 @@ class FortiCertSwap:
             
             # Check if no arguments provided (show help)
             if len(sys.argv) == 1:
-                print("FortiGate Certificate Swap v1.11.0")
+                print(f"FortiGate Certificate Swap v{VERSION}")
                 print("Upload/rotate FortiGate certificates with automatic intermediate CA management")
                 print("")
                 print("Usage examples:")
