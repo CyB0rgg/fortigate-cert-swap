@@ -1,6 +1,16 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [2.0.2] - 2026-11-17
+
+### Fixed
+- **A failed certificate upload was reported as success** - when both the `POST` and the `PUT` to `vpn.certificate/local` came back non-200, the tool printed `Created certificate "…" (via cmdb_post, HTTP 404)`, went on to bind services (which then failed too), printed `Operation completed successfully` and exited 0, so acme.sh reported `Success` for a deployment that did nothing. The upload failure now aborts the run with exit code 1 before any service is touched. (GitHub issue #1)
+- **Failed service bindings did not fail the run** - any failed GUI / SSL-VPN / FTM binding in standard mode now ends the run with `Operation failed … N service binding(s) failed` and exit code 1; previously only a `WARN` line reached the log file.
+- **Failures now say why** - every failed API call prints the HTTP status, the FortiGate `error` / `cli_error` fields when present, and a hint for the usual cause: `404` → the REST API is not answering at that host:port (check `admin-sport`, not the SSL-VPN port), `401` → API key, `403` → `accprofile` / trusted hosts / forced VDOM on a non-VDOM unit.
+
+### Added
+- `main_test.go` - unit tests for the failure description helper (`go test ./...`).
+
 ## [2.0.1] - 2025-08-17
 
 ### 🎨 UX IMPROVEMENTS: Professional Console Output

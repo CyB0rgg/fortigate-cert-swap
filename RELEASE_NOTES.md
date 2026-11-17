@@ -1,3 +1,23 @@
+# Release Notes - v2.0.2
+
+## 🐛 Bug-fix release - failed deployments no longer report success
+
+Fixes GitHub issue #1 ("Global store http 404 error"). If the FortiGate REST API rejects the certificate upload - typically because the configured port is not the admin HTTPS port (`admin-sport`), or the API user lacks permissions - v2.0.1 printed `Created certificate … (HTTP 404)`, tried to bind services (which failed), printed `Operation completed successfully` and exited 0. acme.sh therefore reported `Success` while nothing had changed on the FortiGate.
+
+### Fixed
+- Upload failure (non-200 on both `POST` and `PUT` of `vpn.certificate/local`) now aborts with exit code 1 before any service is touched.
+- Any failed service binding in standard mode now ends the run with exit code 1 and an explicit `Operation failed` line.
+- Every failed API call now prints the HTTP status, the FortiGate `error` / `cli_error` fields, and a hint for the usual cause (`404`: wrong port / not the REST API; `401`: API key; `403`: `accprofile`, trusted hosts, or a VDOM forced on a non-VDOM unit).
+
+### Added
+- Unit tests (`go test ./...`) for the failure description helper.
+
+### Verified
+- Reproduced issue #1 against a server answering 404 to every request: v2.0.1 reports success and exits 0, v2.0.2 aborts with `Certificate upload failed: HTTP 404 - … check admin-sport …` and exit 1.
+- Normal deployment re-run against FortiOS 7.4.11 (no-vdom, `scope=global`) unchanged.
+
+---
+
 # Release Notes - v2.0.1
 
 ## 🎨 UX Improvements Patch Release

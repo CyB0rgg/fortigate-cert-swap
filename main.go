@@ -176,7 +176,7 @@ func (l *Logger) Debug(message string, context map[string]interface{}) {
 }
 
 const (
-	VERSION    = "2.0.1"
+	VERSION    = "2.0.2"
 	API_PREFIX = "/api/v2"
 )
 
@@ -857,6 +857,58 @@ func uploadMissingIntermediateCAIfNeeded(api *FortiAPI, certPEM string) (*map[st
 	}
 	
 	return nil, nil
+}
+
+// describeAPIFailure renders a failed FortiGate API call for humans: HTTP
+// status, the FortiGate error fields when present, and a hint about the most
+// common cause of that status. detail is the map returned by the binding /
+// upload helpers: {"http_status": int, "detail": <response>} or {"error": string}.
+func describeAPIFailure(detail map[string]interface{}) string {
+	if detail == nil {
+		return "no response details available"
+	}
+	if e, ok := detail["error"].(string); ok && e != "" {
+		return e + " (cannot reach the FortiGate REST API: check host/port and firewall)"
+	}
+	code := 0
+	if c, ok := detail["http_status"].(int); ok {
+		code = c
+	}
+	parts := []string{fmt.Sprintf("HTTP %d", code)}
+	if resp, ok := detail["detail"].(map[string]interface{}); ok && resp != nil {
+		if e, ok := resp["error"]; ok {
+			parts = append(parts, fmt.Sprintf("FortiGate error %v", e))
+		}
+		if cli, ok := resp["cli_error"].([]interface{}); ok && len(cli) > 0 {
+			var lines []string
+			for _, l := range cli {
+				lines = append(lines, fmt.Sprintf("%v", l))
+			}
+			parts = append(parts, strings.Join(lines, "; "))
+		}
+	}
+	if hint := apiFailureHint(code); hint != "" {
+		parts = append(parts, hint)
+	}
+	return strings.Join(parts, " - ")
+}
+
+// apiFailureHint returns the most likely cause for an HTTP status from the
+// FortiGate REST API, or "" when there is nothing useful to say.
+func apiFailureHint(code int) string {
+	switch code {
+	case 404:
+		return "the REST API is not answering at this host:port - check `admin-sport` (the admin HTTPS port, not the SSL-VPN port), the URL path, and that nothing rewrites it in between"
+	case 401:
+		return "API key rejected - check the api-user token"
+	case 403:
+		return "forbidden - check the api-user `accprofile` (vpngrp/sysgrp read-write), its trusted hosts, and that you are not forcing a VDOM on a non-VDOM unit"
+	case 424:
+		return "FortiGate rejected the object (dependency / validation failure) - see the FortiGate error above"
+	case 500:
+		return "FortiGate internal error - see the FortiGate error above"
+	}
+	return ""
 }
 
 // Certificate operations
@@ -2074,6 +2126,20 @@ func main() {
 		os.Exit(1)
 	}
 	
+	if state == "error" {
+		reason := describeAPIFailure(detail)
+		if logger != nil {
+			logger.Error(fmt.Sprintf("Certificate upload failed: %s", reason), map[string]interface{}{
+				"cert_name": certName,
+				"store":     getStore(config),
+				"detail":    detail,
+			})
+		}
+		printError(fmt.Sprintf("Certificate upload failed: %s", reason))
+		printError("Aborting: no certificate was created or updated, services left untouched")
+		os.Exit(1)
+	}
+	
 	if logger != nil {
 		logger.Info(fmt.Sprintf("Certificate upload completed: %s", state), map[string]interface{}{
 			"cert_name": certName,
@@ -2107,6 +2173,7 @@ func main() {
 	}
 	
 	// Handle different operation modes
+	bindingFailures := 0
 	if config.CertOnly {
 		printInfo(fmt.Sprintf("Certificate-only mode: %s", certName))
 		printInfo("Certificate-only mode: skipping service binding")
@@ -2308,7 +2375,8 @@ func main() {
 			if success {
 				printSuccess(fmt.Sprintf("Successfully bound certificate to %s", service))
 			} else {
-				printError(fmt.Sprintf("Failed to bind certificate to %s", service))
+				bindingFailures++
+				printError(fmt.Sprintf("Failed to bind certificate to %s: %s", service, describeAPIFailure(detail)))
 			}
 		}
 		
@@ -2402,6 +2470,22 @@ func main() {
 	
 	// Output final result
 	fmt.Println()
+	if bindingFailures > 0 {
+		result.Status = "error"
+		printError(fmt.Sprintf("Operation failed: certificate \"%s\" is on the FortiGate but %d service binding(s) failed", certName, bindingFailures))
+		if logger != nil {
+			logger.Error("Certificate operation failed: service bindings failed", map[string]interface{}{
+				"cert_name": certName,
+				"mode":      result.Mode,
+				"failed":    bindingFailures,
+			})
+		}
+		if config.LogLevel == "debug" {
+			jsonOutput, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Printf("\n%s %s\n%s\n", colorize(ColorDim, "[DEBUG]"), colorize(ColorDim, "JSON Result:"), colorize(ColorDim, string(jsonOutput)))
+		}
+		os.Exit(1)
+	}
 	printSuccess("Operation completed successfully")
 	
 	// Log operation completion
